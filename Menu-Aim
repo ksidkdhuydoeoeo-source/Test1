@@ -1,0 +1,564 @@
+-- Delta UI Script với Hitbox, Aimbot, Silent Aim
+-- Được tối ưu hóa cho hiệu suất và dễ chỉnh sửa
+
+local DeltaUI = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Cấu hình dễ chỉnh sửa
+local Config = {
+    -- Aimbot
+    Aimbot = {
+        Enabled = false,
+        SilentAim = false,
+        HitboxEnabled = true,
+        HitboxSize = Vector3.new(5, 5, 5), -- Kích thước hitbox mở rộng
+        FOV = 180, -- Field of View (độ)
+        AimPart = "Head", -- Head, HumanoidRootPart, Torso
+        Smoothness = 1, -- Độ mượt (1 = instant, 5 = mượt nhất)
+        TeamCheck = false,
+        WallCheck = true,
+        Prediction = 0.15, -- Dự đoán chuyển động
+        ShowFOV = true,
+        FOVColor = Color3.fromRGB(255, 255, 255),
+        FOVTransparency = 0.3,
+        Keybind = Enum.KeyCode.E,
+        ToggleMode = false, -- false = giữ, true = toggle
+        MaxDistance = 500
+    },
+    
+    -- Hitbox
+    Hitbox = {
+        Enabled = true,
+        ShowSkeleton = true, -- Hiển thị khung xương
+        SkeletonColor = Color3.fromRGB(0, 255, 0),
+        SkeletonThickness = 1,
+        HitboxColor = Color3.fromRGB(255, 0, 0),
+        HitboxTransparency = 0.5,
+        HitboxSize = 5,
+        AutoUpdate = true,
+        UpdateInterval = 0.1,
+        ShowDistance = true,
+        TargetOnly = true -- Chỉ hiển thị hitbox của mục tiêu đang khóa
+    },
+    
+    -- Speed
+    Speed = {
+        Enabled = false,
+        SpeedValue = 16,
+        Method = "WalkSpeed", -- WalkSpeed, Velocity, Teleport
+        Acceleration = 1,
+        Keybind = Enum.KeyCode.LeftShift
+    },
+    
+    -- UI
+    UI = {
+        AccentColor = Color3.fromRGB(90, 200, 255),
+        Background = Color3.fromRGB(30, 30, 30),
+        ToggleKey = Enum.KeyCode.RightControl
+    }
+}
+
+-- Biến lưu trữ
+local Target = nil
+local HighlightBoxes = {}
+local SkeletonDrawings = {}
+local FOVCircle = nil
+local isAiming = false
+local lastUpdate = 0
+
+-- Cache cho hiệu suất
+local DrawingCache = {}
+local function GetDrawing(className, properties)
+    local key = className .. json.encode(properties or {})
+    if not DrawingCache[key] then
+        local drawing = Drawing.new(className)
+        for prop, value in pairs(properties or {}) do
+            drawing[prop] = value
+        end
+        DrawingCache[key] = drawing
+    end
+    return DrawingCache[key]
+end
+
+-- Hàm tạo UI
+function DeltaUI:CreateUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "DeltaUI"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    
+    -- Main Frame
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 400, 0, 600)
+    MainFrame.Position = UDim2.new(0.5, -200, 0.5, -300)
+    MainFrame.BackgroundColor3 = Config.UI.Background
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
+    
+    -- Tiêu đề
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = Config.UI.AccentColor
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Size = UDim2.new(1, -40, 1, 0)
+    TitleText.Position = UDim2.new(0, 10, 0, 0)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Font = Enum.Font.GothamBold
+    TitleText.Text = "Delta UI"
+    TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleText.TextSize = 20
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.Parent = TitleBar
+    
+    -- Tabs
+    local TabHolder = Instance.new("Frame")
+    TabHolder.Size = UDim2.new(1, 0, 0, 30)
+    TabHolder.Position = UDim2.new(0, 0, 0, 40)
+    TabHolder.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    TabHolder.BorderSizePixel = 0
+    TabHolder.Parent = MainFrame
+    
+    local Tabs = {"Aimbot", "Hitbox", "Speed", "Settings"}
+    local TabButtons = {}
+    local ContentFrames = {}
+    
+    for i, tabName in ipairs(Tabs) do
+        local TabButton = Instance.new("TextButton")
+        TabButton.Size = UDim2.new(1/#Tabs, 0, 1, 0)
+        TabButton.Position = UDim2.new((i-1)/#Tabs, 0, 0, 0)
+        TabButton.BackgroundColor3 = i == 1 and Config.UI.AccentColor or Color3.fromRGB(50, 50, 50)
+        TabButton.Text = tabName
+        TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TabButton.Font = Enum.Font.Gotham
+        TabButton.TextSize = 14
+        TabButton.BorderSizePixel = 0
+        TabButton.Parent = TabHolder
+        TabButtons[i] = TabButton
+        
+        -- Content Frame
+        local ContentFrame = Instance.new("ScrollingFrame")
+        ContentFrame.Size = UDim2.new(1, -20, 1, -80)
+        ContentFrame.Position = UDim2.new(0, 10, 0, 75)
+        ContentFrame.BackgroundTransparency = 1
+        ContentFrame.BorderSizePixel = 0
+        ContentFrame.ScrollBarThickness = 5
+        ContentFrame.Visible = i == 1
+        ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 600)
+        ContentFrame.Parent = MainFrame
+        ContentFrames[i] = ContentFrame
+        
+        TabButton.MouseButton1Click:Connect(function()
+            for j, btn in ipairs(TabButtons) do
+                btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+                ContentFrames[j].Visible = false
+            end
+            TabButton.BackgroundColor3 = Config.UI.AccentColor
+            ContentFrame.Visible = true
+        end)
+    end
+    
+    -- Helper functions
+    local function AddToggle(parent, text, config, yOffset)
+        local Toggle = Instance.new("TextButton")
+        Toggle.Size = UDim2.new(1, -10, 0, 30)
+        Toggle.Position = UDim2.new(0, 5, 0, yOffset)
+        Toggle.BackgroundColor3 = config.Value and Config.UI.AccentColor or Color3.fromRGB(60, 60, 60)
+        Toggle.Text = text
+        Toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Toggle.Font = Enum.Font.Gotham
+        Toggle.TextSize = 14
+        Toggle.BorderSizePixel = 0
+        Toggle.Parent = parent
+        
+        Toggle.MouseButton1Click:Connect(function()
+            config.Value = not config.Value
+            Toggle.BackgroundColor3 = config.Value and Config.UI.AccentColor or Color3.fromRGB(60, 60, 60)
+        end)
+        
+        return Toggle
+    end
+    
+    local function AddSlider(parent, text, config, min, max, yOffset)
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.new(1, -10, 0, 20)
+        Label.Position = UDim2.new(0, 5, 0, yOffset)
+        Label.BackgroundTransparency = 1
+        Label.Text = text .. ": " .. tostring(config.Value)
+        Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Label.Font = Enum.Font.Gotham
+        Label.TextSize = 12
+        Label.Parent = parent
+        
+        local Slider = Instance.new("TextBox")
+        Slider.Size = UDim2.new(1, -10, 0, 25)
+        Slider.Position = UDim2.new(0, 5, 0, yOffset + 20)
+        Slider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        Slider.Text = tostring(config.Value)
+        Slider.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Slider.Font = Enum.Font.Gotham
+        Slider.TextSize = 12
+        Slider.BorderSizePixel = 0
+        Slider.Parent = parent
+        
+        Slider.FocusLost:Connect(function()
+            local num = tonumber(Slider.Text)
+            if num then
+                num = math.clamp(num, min, max)
+                config.Value = num
+                Label.Text = text .. ": " .. tostring(num)
+            end
+        end)
+        
+        return Label, Slider
+    end
+    
+    -- Aimbot Tab
+    local yOffset = 5
+    yOffset += 35
+    AddToggle(ContentFrames[1], "Enable Aimbot", {Value = Config.Aimbot.Enabled}, yOffset)
+    Config.Aimbot.Enabled = false -- Reset vì Value là new table
+    yOffset += 35
+    AddToggle(ContentFrames[1], "Silent Aim", {Value = Config.Aimbot.SilentAim}, yOffset)
+    yOffset += 35
+    AddToggle(ContentFrames[1], "Show FOV", {Value = Config.Aimbot.ShowFOV}, yOffset)
+    yOffset += 35
+    AddSlider(ContentFrames[1], "FOV Size", {Value = Config.Aimbot.FOV}, 10, 500, yOffset)
+    yOffset += 55
+    AddSlider(ContentFrames[1], "Smoothness", {Value = Config.Aimbot.Smoothness}, 1, 10, yOffset)
+    yOffset += 55
+    AddSlider(ContentFrames[1], "Prediction", {Value = Config.Aimbot.Prediction}, 0, 1, yOffset)
+    yOffset += 55
+    
+    -- Hitbox Tab
+    yOffset = 5
+    AddToggle(ContentFrames[2], "Enable Hitbox", {Value = Config.Hitbox.Enabled}, yOffset)
+    yOffset += 35
+    AddToggle(ContentFrames[2], "Show Skeleton", {Value = Config.Hitbox.ShowSkeleton}, yOffset)
+    yOffset += 35
+    AddSlider(ContentFrames[2], "Hitbox Size", {Value = Config.Hitbox.HitboxSize}, 1, 20, yOffset)
+    yOffset += 55
+    
+    -- Speed Tab
+    yOffset = 5
+    AddToggle(ContentFrames[3], "Enable Speed", {Value = Config.Speed.Enabled}, yOffset)
+    yOffset += 35
+    AddSlider(ContentFrames[3], "Speed Value", {Value = Config.Speed.SpeedValue}, 16, 100, yOffset)
+    yOffset += 55
+    
+    -- Settings Tab
+    yOffset = 5
+    local AccentColor = AddSlider(ContentFrames[4], "Accent Color", {Value = 0}, 0, 255, yOffset)
+    yOffset += 55
+    
+    return ScreenGui
+end
+
+-- Hàm kiểm tra line of sight
+local function IsVisible(target)
+    if not Config.Aimbot.WallCheck then return true end
+    
+    local character = LocalPlayer.Character
+    if not character then return false end
+    
+    local origin = Camera.CFrame.Position
+    local targetPos = target.Position
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local raycastResult = workspace:Raycast(origin, targetPos - origin, raycastParams)
+    
+    if raycastResult then
+        return false
+    end
+    
+    return true
+end
+
+-- Hàm lấy target gần nhất
+local function GetClosestTarget()
+    local closestTarget = nil
+    local closestDistance = Config.Aimbot.FOV
+    
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if Config.Aimbot.TeamCheck and player.Team == LocalPlayer.Team then
+                continue
+            end
+            
+            local targetChar = player.Character
+            if targetChar and targetChar:FindFirstChild("Humanoid") and targetChar.Humanoid.Health > 0 then
+                local targetPart = targetChar:FindFirstChild(Config.Aimbot.AimPart) or targetChar:FindFirstChild("Head")
+                if targetPart then
+                    local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                    
+                    if onScreen then
+                        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        
+                        if distance < closestDistance then
+                            if IsVisible(targetPart) then
+                                closestTarget = targetPart
+                                closestDistance = distance
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestTarget
+end
+
+-- Hàm aim
+local function AimAt(target)
+    if not target then return end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local targetVelocity = Vector3.new(0, 0, 0)
+    local targetHumanoid = target.Parent:FindFirstChild("Humanoid")
+    local targetRoot = target.Parent:FindFirstChild("HumanoidRootPart")
+    
+    if targetHumanoid and targetRoot then
+        targetVelocity = targetRoot.AssemblyLinearVelocity
+    end
+    
+    local predictedPosition = target.Position + targetVelocity * Config.Aimbot.Prediction
+    
+    if Config.Aimbot.SilentAim then
+        -- Silent aim - chỉ thay đổi hướng đạn (giả lập)
+        local aimDirection = (predictedPosition - Camera.CFrame.Position).Unit
+        -- Trong thực tế, silent aim cần hook vào remote events
+        -- Đây là mô phỏng visual
+        Target = target
+    else
+        local lookAt = CFrame.lookAt(Camera.CFrame.Position, predictedPosition)
+        
+        if Config.Aimbot.Smoothness > 1 then
+            local smooth = Config.Aimbot.Smoothness * 0.1
+            Camera.CFrame = Camera.CFrame:Lerp(lookAt, smooth)
+        else
+            Camera.CFrame = lookAt
+        end
+    end
+end
+
+-- Hàm vẽ FOV Circle
+local function DrawFOV()
+    if FOVCircle then
+        FOVCircle:Remove()
+    end
+    
+    if Config.Aimbot.ShowFOV then
+        FOVCircle = Drawing.new("Circle")
+        FOVCircle.Visible = true
+        FOVCircle.Radius = Config.Aimbot.FOV
+        FOVCircle.Color = Config.Aimbot.FOVColor
+        FOVCircle.Transparency = Config.Aimbot.FOVTransparency
+        FOVCircle.Thickness = 2
+        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+end
+
+-- Hàm vẽ hitbox
+local function DrawHitbox(target, index)
+    if not target or not target.Parent then return end
+    
+    local character = target.Parent
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not rootPart then return end
+    
+    -- Xóa hitbox cũ
+    if HighlightBoxes[index] then
+        HighlightBoxes[index]:Remove()
+        HighlightBoxes[index] = nil
+    end
+    
+    -- Vẽ hitbox 3D
+    local box = Drawing.new("Square")
+    box.Visible = true
+    box.Color = Config.Hitbox.HitboxColor
+    box.Transparency = Config.Hitbox.HitboxTransparency
+    box.Thickness = 1
+    box.Size = Vector2.new(Config.Hitbox.HitboxSize * 10, Config.Hitbox.HitboxSize * 20)
+    
+    -- Vẽ skeleton
+    if Config.Hitbox.ShowSkeleton then
+        local parts = {
+            {"Head", "UpperTorso"},
+            {"UpperTorso", "LowerTorso"},
+            {"UpperTorso", "LeftUpperArm"},
+            {"LeftUpperArm", "LeftLowerArm"},
+            {"LeftLowerArm", "LeftHand"},
+            {"UpperTorso", "RightUpperArm"},
+            {"RightUpperArm", "RightLowerArm"},
+            {"RightLowerArm", "RightHand"},
+            {"LowerTorso", "LeftUpperLeg"},
+            {"LeftUpperLeg", "LeftLowerLeg"},
+            {"LeftLowerLeg", "LeftFoot"},
+            {"LowerTorso", "RightUpperLeg"},
+            {"RightUpperLeg", "RightLowerLeg"},
+            {"RightLowerLeg", "RightFoot"}
+        }
+        
+        for i, connection in ipairs(parts) do
+            local part1 = character:FindFirstChild(connection[1])
+            local part2 = character:FindFirstChild(connection[2])
+            
+            if part1 and part2 then
+                local line = Drawing.new("Line")
+                line.Visible = true
+                line.Color = Config.Hitbox.SkeletonColor
+                line.Thickness = Config.Hitbox.SkeletonThickness
+                
+                local screenPos1 = Camera:WorldToScreenPoint(part1.Position)
+                local screenPos2 = Camera:WorldToScreenPoint(part2.Position)
+                
+                line.From = Vector2.new(screenPos1.X, screenPos1.Y)
+                line.To = Vector2.new(screenPos2.X, screenPos2.Y)
+                
+                SkeletonDrawings[#SkeletonDrawings + 1] = line
+            end
+        end
+    end
+    
+    HighlightBoxes[index] = box
+    
+    -- Cập nhật vị trí box
+    local screenPos = Camera:WorldToScreenPoint(rootPart.Position)
+    box.Position = Vector2.new(screenPos.X, screenPos.Y)
+    
+    -- Hiển thị khoảng cách
+    if Config.Hitbox.ShowDistance then
+        local distance = (rootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+        local distanceText = Drawing.new("Text")
+        distanceText.Visible = true
+        distanceText.Text = string.format("%.1f m", distance)
+        distanceText.Color = Color3.fromRGB(255, 255, 255)
+        distanceText.Size = 15
+        distanceText.Position = Vector2.new(screenPos.X, screenPos.Y - 50)
+        distanceText.Center = true
+        distanceText.Outline = true
+        
+        if not HighlightBoxes[index .. "_text"] then
+            HighlightBoxes[index .. "_text"] = distanceText
+        end
+    end
+end
+
+-- Main Loop
+local function MainLoop()
+    -- Speed
+    if Config.Speed.Enabled and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = Config.Speed.SpeedValue
+        end
+    end
+    
+    -- Aimbot
+    if Config.Aimbot.Enabled then
+        local isKeyPressed = UserInputService:IsKeyDown(Config.Aimbot.Keybind)
+        
+        if Config.Aimbot.ToggleMode then
+            -- Toggle mode
+            if isKeyPressed and not isAiming then
+                isAiming = true
+                wait(0.1) -- Debounce
+            elseif isKeyPressed and isAiming then
+                isAiming = false
+                wait(0.1)
+            end
+        else
+            isAiming = isKeyPressed
+        end
+        
+        if isAiming then
+            local target = GetClosestTarget()
+            if target then
+                AimAt(target)
+                Target = target
+                
+                -- Vẽ hitbox cho target
+                if Config.Hitbox.Enabled and Config.Hitbox.TargetOnly then
+                    for i = 1, #Players:GetPlayers() do
+                        if HighlightBoxes[i] then
+                            HighlightBoxes[i]:Remove()
+                            HighlightBoxes[i] = nil
+                        end
+                    end
+                    for i, line in ipairs(SkeletonDrawings) do
+                        line:Remove()
+                    end
+                    SkeletonDrawings = {}
+                    
+                    DrawHitbox(target, 1)
+                end
+            end
+        end
+    end
+    
+    -- Hitbox cho tất cả player
+    if Config.Hitbox.Enabled and not Config.Hitbox.TargetOnly then
+        local players = Players:GetPlayers()
+        for i, player in ipairs(players) do
+            if player ~= LocalPlayer and player.Character then
+                local targetPart = player.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    DrawHitbox(targetPart, i)
+                end
+            end
+        end
+    end
+    
+    -- Cập nhật FOV
+    if Config.Aimbot.ShowFOV and FOVCircle then
+        FOVCircle.Radius = Config.Aimbot.FOV
+        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+end
+
+-- Khởi tạo
+local function Init()
+    local UI = DeltaUI:CreateUI()
+    DrawFOV()
+    
+    -- Kết nối Input
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if input.KeyCode == Config.UI.ToggleKey then
+            UI.MainFrame.Visible = not UI.MainFrame.Visible
+        end
+    end)
+    
+    -- Chạy main loop
+    RunService.RenderStepped:Connect(MainLoop)
+end
+
+-- Bắt đầu
+Init()
+
+return DeltaUI
