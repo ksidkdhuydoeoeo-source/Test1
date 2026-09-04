@@ -1,0 +1,546 @@
+-- Delta UI Script - Fixed Hitbox Skeleton & Menu Toggle
+-- Đã sửa khớp xương chính xác và menu đóng/mở hoàn chỉnh
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Cấu hình
+local Config = {
+    Aimbot = {
+        Enabled = false,
+        SilentAim = false,
+        FOV = 150,
+        AimPart = "Head",
+        Smoothness = 1,
+        TeamCheck = false,
+        WallCheck = false,
+        Prediction = 0.15,
+        ShowFOV = true,
+        Keybind = Enum.KeyCode.E,
+        ToggleMode = true
+    },
+    Hitbox = {
+        Enabled = true,
+        ShowSkeleton = true,
+        HitboxSize = 5,
+        TargetOnly = false,
+        SkeletonColor = Color3.fromRGB(0, 255, 0),
+        HitboxColor = Color3.fromRGB(255, 0, 0),
+        HitboxTransparency = 0.5,
+        SkeletonThickness = 2
+    },
+    Speed = {
+        Enabled = false,
+        SpeedValue = 30
+    },
+    UI = {
+        AccentColor = Color3.fromRGB(100, 180, 255),
+        Background = Color3.fromRGB(25, 25, 35),
+        ToggleKey = Enum.KeyCode.RightControl,
+        MinimizeKey = Enum.KeyCode.LeftControl
+    }
+}
+
+local Target = nil
+local HighlightBoxes = {}
+local FOVCircle = nil
+local isAiming = false
+local ScreenGui = nil
+local MainContainer = nil
+local isMinimized = false
+
+-- Hàm tạo Drawing an toàn
+local function CreateDrawing(type, properties)
+    local success, drawing = pcall(function()
+        local d = Drawing.new(type)
+        for prop, value in pairs(properties or {}) do
+            pcall(function()
+                d[prop] = value
+            end)
+        end
+        return d
+    end)
+    return success and drawing or nil
+end
+
+-- Hàm tạo UI
+local function CreateUI()
+    if ScreenGui then
+        ScreenGui:Destroy()
+    end
+    
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "DeltaUI"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    
+    -- Main Frame
+    MainContainer = Instance.new("Frame")
+    MainContainer.Size = UDim2.new(0, 450, 0, 550)
+    MainContainer.Position = UDim2.new(0.5, -225, 0.5, -275)
+    MainContainer.BackgroundColor3 = Config.UI.Background
+    MainContainer.BorderSizePixel = 0
+    MainContainer.Active = true
+    MainContainer.Draggable = true
+    MainContainer.Parent = ScreenGui
+    
+    -- Title Bar
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.Position = UDim2.new(0, 0, 0, 0)
+    TitleBar.BackgroundColor3 = Config.UI.AccentColor
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainContainer
+    
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Size = UDim2.new(1, -120, 1, 0)
+    TitleText.Position = UDim2.new(0, 20, 0, 0)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Font = Enum.Font.GothamBold
+    TitleText.Text = "DELTA UI"
+    TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleText.TextSize = 20
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.Parent = TitleBar
+    
+    -- Minimize Button
+    local MinimizeButton = Instance.new("TextButton")
+    MinimizeButton.Size = UDim2.new(0, 40, 0, 40)
+    MinimizeButton.Position = UDim2.new(1, -80, 0, 0)
+    MinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
+    MinimizeButton.Text = "—"
+    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinimizeButton.Font = Enum.Font.GothamBold
+    MinimizeButton.TextSize = 18
+    MinimizeButton.BorderSizePixel = 0
+    MinimizeButton.Parent = TitleBar
+    
+    -- Close Button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 40, 0, 40)
+    CloseButton.Position = UDim2.new(1, -40, 0, 0)
+    CloseButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    CloseButton.Text = "X"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.TextSize = 18
+    CloseButton.BorderSizePixel = 0
+    CloseButton.Parent = TitleBar
+    
+    -- Xử lý nút minimize - chỉ ẩn phần content, giữ title bar
+    MinimizeButton.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        if isMinimized then
+            -- Ẩn content, chỉ giữ title bar
+            for _, child in ipairs(MainContainer:GetChildren()) do
+                if child ~= TitleBar then
+                    child.Visible = false
+                end
+            end
+            MainContainer.Size = UDim2.new(0, 450, 0, 40)
+        else
+            -- Hiện lại content
+            for _, child in ipairs(MainContainer:GetChildren()) do
+                child.Visible = true
+            end
+            MainContainer.Size = UDim2.new(0, 450, 0, 550)
+        end
+    end)
+    
+    -- Xử lý nút close - ẩn toàn bộ menu
+    CloseButton.MouseButton1Click:Connect(function()
+        ScreenGui.Enabled = false
+    end)
+    
+    -- Tabs
+    local TabHolder = Instance.new("Frame")
+    TabHolder.Size = UDim2.new(1, 0, 0, 35)
+    TabHolder.Position = UDim2.new(0, 0, 0, 40)
+    TabHolder.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    TabHolder.BorderSizePixel = 0
+    TabHolder.Parent = MainContainer
+    
+    local Tabs = {"Aimbot", "Hitbox", "Speed"}
+    local TabButtons = {}
+    local ContentFrames = {}
+    
+    for i, tabName in ipairs(Tabs) do
+        local TabButton = Instance.new("TextButton")
+        TabButton.Size = UDim2.new(1/3, 0, 1, 0)
+        TabButton.Position = UDim2.new((i-1)/3, 0, 0, 0)
+        TabButton.BackgroundColor3 = i == 1 and Config.UI.AccentColor or Color3.fromRGB(40, 40, 50)
+        TabButton.Text = tabName
+        TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TabButton.Font = Enum.Font.Gotham
+        TabButton.TextSize = 13
+        TabButton.BorderSizePixel = 0
+        TabButton.AutoButtonColor = false
+        TabButton.Parent = TabHolder
+        TabButtons[i] = TabButton
+        
+        local ContentFrame = Instance.new("ScrollingFrame")
+        ContentFrame.Size = UDim2.new(1, -10, 1, -80)
+        ContentFrame.Position = UDim2.new(0, 5, 0, 80)
+        ContentFrame.BackgroundTransparency = 1
+        ContentFrame.BorderSizePixel = 0
+        ContentFrame.ScrollBarThickness = 3
+        ContentFrame.Visible = i == 1
+        ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 400)
+        ContentFrame.Parent = MainContainer
+        ContentFrames[i] = ContentFrame
+        
+        TabButton.MouseButton1Click:Connect(function()
+            for j, btn in ipairs(TabButtons) do
+                btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+                ContentFrames[j].Visible = false
+            end
+            TabButton.BackgroundColor3 = Config.UI.AccentColor
+            ContentFrame.Visible = true
+        end)
+    end
+    
+    -- Helper tạo toggle
+    local function AddToggle(parent, text, config, yOffset)
+        local ToggleFrame = Instance.new("Frame")
+        ToggleFrame.Size = UDim2.new(1, 0, 0, 35)
+        ToggleFrame.Position = UDim2.new(0, 0, 0, yOffset)
+        ToggleFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        ToggleFrame.BorderSizePixel = 0
+        ToggleFrame.Parent = parent
+        
+        local ToggleLabel = Instance.new("TextLabel")
+        ToggleLabel.Size = UDim2.new(0.7, 0, 1, 0)
+        ToggleLabel.Position = UDim2.new(0, 10, 0, 0)
+        ToggleLabel.BackgroundTransparency = 1
+        ToggleLabel.Text = text
+        ToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleLabel.Font = Enum.Font.Gotham
+        ToggleLabel.TextSize = 14
+        ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        ToggleLabel.Parent = ToggleFrame
+        
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Size = UDim2.new(0, 60, 0, 25)
+        ToggleButton.Position = UDim2.new(1, -70, 0.5, -12.5)
+        ToggleButton.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+        ToggleButton.Text = config.Value and "ON" or "OFF"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleButton.Font = Enum.Font.GothamBold
+        ToggleButton.TextSize = 12
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.AutoButtonColor = false
+        ToggleButton.Parent = ToggleFrame
+        
+        ToggleButton.MouseButton1Click:Connect(function()
+            config.Value = not config.Value
+            ToggleButton.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+            ToggleButton.Text = config.Value and "ON" or "OFF"
+        end)
+    end
+    
+    -- Helper tạo slider
+    local function AddSlider(parent, text, config, min, max, yOffset)
+        local SliderFrame = Instance.new("Frame")
+        SliderFrame.Size = UDim2.new(1, 0, 0, 55)
+        SliderFrame.Position = UDim2.new(0, 0, 0, yOffset)
+        SliderFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        SliderFrame.BorderSizePixel = 0
+        SliderFrame.Parent = parent
+        
+        local SliderLabel = Instance.new("TextLabel")
+        SliderLabel.Size = UDim2.new(1, -10, 0, 20)
+        SliderLabel.Position = UDim2.new(0, 5, 0, 5)
+        SliderLabel.BackgroundTransparency = 1
+        SliderLabel.Text = text .. ": " .. tostring(config.Value)
+        SliderLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        SliderLabel.Font = Enum.Font.Gotham
+        SliderLabel.TextSize = 12
+        SliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+        SliderLabel.Parent = SliderFrame
+        
+        local SliderInput = Instance.new("TextBox")
+        SliderInput.Size = UDim2.new(1, -10, 0, 25)
+        SliderInput.Position = UDim2.new(0, 5, 0, 25)
+        SliderInput.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+        SliderInput.Text = tostring(config.Value)
+        SliderInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+        SliderInput.Font = Enum.Font.Gotham
+        SliderInput.TextSize = 12
+        SliderInput.BorderSizePixel = 0
+        SliderInput.Parent = SliderFrame
+        
+        SliderInput.FocusLost:Connect(function()
+            local num = tonumber(SliderInput.Text)
+            if num then
+                num = math.clamp(num, min, max)
+                config.Value = num
+                SliderLabel.Text = text .. ": " .. tostring(num)
+            end
+        end)
+    end
+    
+    -- Thêm components
+    local yOffset = 5
+    AddToggle(ContentFrames[1], "Enable Aimbot", {Value = Config.Aimbot.Enabled}, yOffset)
+    Config.Aimbot.Enabled = false
+    yOffset += 40
+    AddToggle(ContentFrames[1], "Silent Aim", {Value = Config.Aimbot.SilentAim}, yOffset)
+    yOffset += 40
+    AddToggle(ContentFrames[1], "Show FOV", {Value = Config.Aimbot.ShowFOV}, yOffset)
+    yOffset += 40
+    AddSlider(ContentFrames[1], "FOV Size", {Value = Config.Aimbot.FOV}, 10, 300, yOffset)
+    yOffset += 60
+    AddSlider(ContentFrames[1], "Smoothness", {Value = Config.Aimbot.Smoothness}, 1, 10, yOffset)
+    
+    yOffset = 5
+    AddToggle(ContentFrames[2], "Enable Hitbox", {Value = Config.Hitbox.Enabled}, yOffset)
+    Config.Hitbox.Enabled = true
+    yOffset += 40
+    AddToggle(ContentFrames[2], "Show Skeleton", {Value = Config.Hitbox.ShowSkeleton}, yOffset)
+    yOffset += 40
+    AddSlider(ContentFrames[2], "Hitbox Size", {Value = Config.Hitbox.HitboxSize}, 1, 20, yOffset)
+    
+    yOffset = 5
+    AddToggle(ContentFrames[3], "Enable Speed", {Value = Config.Speed.Enabled}, yOffset)
+    Config.Speed.Enabled = false
+    yOffset += 40
+    AddSlider(ContentFrames[3], "Speed Value", {Value = Config.Speed.SpeedValue}, 16, 100, yOffset)
+    
+    return ScreenGui
+end
+
+-- Hàm lấy target
+local function GetClosestTarget()
+    local closestTarget = nil
+    local closestDistance = Config.Aimbot.FOV
+    
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if Config.Aimbot.TeamCheck and player.Team == LocalPlayer.Team then
+                continue
+            end
+            
+            local targetChar = player.Character
+            local humanoid = targetChar:FindFirstChild("Humanoid")
+            local targetPart = targetChar:FindFirstChild(Config.Aimbot.AimPart) or targetChar:FindFirstChild("Head")
+            
+            if humanoid and humanoid.Health > 0 and targetPart then
+                local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                
+                if onScreen then
+                    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    
+                    if distance < closestDistance then
+                        closestTarget = targetPart
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestTarget
+end
+
+-- Hàm aim
+local function AimAt(target)
+    if not target then return end
+    
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local predictedPosition = target.Position
+    
+    if Config.Aimbot.SilentAim then
+        Target = target
+    else
+        local lookAt = CFrame.lookAt(Camera.CFrame.Position, predictedPosition)
+        if Config.Aimbot.Smoothness > 1 then
+            local smooth = Config.Aimbot.Smoothness * 0.1
+            Camera.CFrame = Camera.CFrame:Lerp(lookAt, smooth)
+        else
+            Camera.CFrame = lookAt
+        end
+    end
+end
+
+-- Vẽ FOV
+local function DrawFOV()
+    if FOVCircle then
+        FOVCircle:Remove()
+        FOVCircle = nil
+    end
+    
+    if Config.Aimbot.ShowFOV then
+        FOVCircle = CreateDrawing("Circle", {
+            Visible = true,
+            Radius = Config.Aimbot.FOV,
+            Color = Color3.fromRGB(255, 255, 255),
+            Transparency = 0.5,
+            Thickness = 2,
+            Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        })
+    end
+end
+
+-- Vẽ Hitbox với skeleton chính xác theo cơ thể Roblox
+local function DrawHitbox(target, index)
+    if not target or not target.Parent then return end
+    
+    local character = target.Parent
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not rootPart or not humanoid or humanoid.Health <= 0 then return end
+    
+    if HighlightBoxes[index] then
+        for _, drawing in ipairs(HighlightBoxes[index]) do
+            drawing:Remove()
+        end
+    end
+    HighlightBoxes[index] = {}
+    
+    -- Vẽ hitbox chính tại HumanoidRootPart
+    local screenPos = Camera:WorldToScreenPoint(rootPart.Position)
+    local boxSize = Config.Hitbox.HitboxSize * 10
+    
+    local box = CreateDrawing("Square", {
+        Visible = true,
+        Color = Config.Hitbox.HitboxColor,
+        Transparency = Config.Hitbox.HitboxTransparency,
+        Thickness = 2,
+        Size = Vector2.new(boxSize, boxSize * 2),
+        Position = Vector2.new(screenPos.X, screenPos.Y)
+    })
+    if box then
+        table.insert(HighlightBoxes[index], box)
+    end
+    
+    -- Vẽ skeleton chính xác theo cấu trúc Roblox R15/R6
+    if Config.Hitbox.ShowSkeleton then
+        -- Danh sách các kết nối xương chính xác cho cả R6 và R15
+        local skeletonConnections = {
+            -- Đầu và thân
+            {"Head", "UpperTorso"},
+            {"Head", "Neck"},
+            {"Neck", "UpperTorso"},
+            
+            -- Thân trên và dưới
+            {"UpperTorso", "LowerTorso"},
+            {"LowerTorso", "HumanoidRootPart"},
+            
+            -- Tay trái
+            {"UpperTorso", "LeftUpperArm"},
+            {"LeftUpperArm", "LeftLowerArm"},
+            {"LeftLowerArm", "LeftHand"},
+            
+            -- Tay phải
+            {"UpperTorso", "RightUpperArm"},
+            {"RightUpperArm", "RightLowerArm"},
+            {"RightLowerArm", "RightHand"},
+            
+            -- Chân trái
+            {"LowerTorso", "LeftUpperLeg"},
+            {"LeftUpperLeg", "LeftLowerLeg"},
+            {"LeftLowerLeg", "LeftFoot"},
+            
+            -- Chân phải
+            {"LowerTorso", "RightUpperLeg"},
+            {"RightUpperLeg", "RightLowerLeg"},
+            {"RightLowerLeg", "RightFoot"},
+            
+            -- Kết nối vai (nếu có)
+            {"Neck", "LeftShoulder"},
+            {"Neck", "RightShoulder"},
+            {"LeftShoulder", "LeftUpperArm"},
+            {"RightShoulder", "RightUpperArm"},
+            
+            -- Kết nối hông (nếu có)
+            {"HumanoidRootPart", "LeftHip"},
+            {"HumanoidRootPart", "RightHip"},
+            {"LeftHip", "LeftUpperLeg"},
+            {"RightHip", "RightUpperLeg"}
+        }
+        
+        for _, connection in ipairs(skeletonConnections) do
+            local part1 = character:FindFirstChild(connection[1])
+            local part2 = character:FindFirstChild(connection[2])
+            
+            if part1 and part2 then
+                local screenPos1 = Camera:WorldToScreenPoint(part1.Position)
+                local screenPos2 = Camera:WorldToScreenPoint(part2.Position)
+                
+                -- Chỉ vẽ nếu cả hai điểm đều nhìn thấy được
+                if screenPos1.Z > 0 and screenPos2.Z > 0 then
+                    local line = CreateDrawing("Line", {
+                        Visible = true,
+                        Color = Config.Hitbox.SkeletonColor,
+                        Thickness = Config.Hitbox.SkeletonThickness,
+                        From = Vector2.new(screenPos1.X, screenPos1.Y),
+                        To = Vector2.new(screenPos2.X, screenPos2.Y)
+                    })
+                    if line then
+                        table.insert(HighlightBoxes[index], line)
+                    end
+                end
+            end
+        end
+        
+        -- Vẽ các điểm khớp
+        local jointParts = {
+            "Head", "Neck", "UpperTorso", "LowerTorso", "HumanoidRootPart",
+            "LeftShoulder", "RightShoulder",
+            "LeftUpperArm", "LeftLowerArm", "LeftHand",
+            "RightUpperArm", "RightLowerArm", "RightHand",
+            "LeftHip", "RightHip",
+            "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+            "RightUpperLeg", "RightLowerLeg", "RightFoot"
+        }
+        
+        for _, partName in ipairs(jointParts) do
+            local part = character:FindFirstChild(partName)
+            if part then
+                local jointScreenPos = Camera:WorldToScreenPoint(part.Position)
+                if jointScreenPos.Z > 0 then
+                    local jointDot = CreateDrawing("Circle", {
+                        Visible = true,
+                        Radius = 3,
+                        Color = Config.Hitbox.SkeletonColor,
+                        Transparency = 0.5,
+                        Thickness = 1,
+                        Position = Vector2.new(jointScreenPos.X, jointScreenPos.Y)
+                    })
+                    if jointDot then
+                        table.insert(HighlightBoxes[index], jointDot)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Main Loop
+local function MainLoop()
+    -- Speed
+    if Config.Speed.Enabled then
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = Config.Speed.SpeedValue
+            end
+        end
+    end
+    
+    -- Aimbot
+    if Config.Aimbot.Enabled then
+        
