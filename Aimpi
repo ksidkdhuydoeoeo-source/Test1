@@ -1,0 +1,535 @@
+-- Delta UI Script - Fixed & Enhanced
+-- Đã sửa lỗi và thêm bypass anti-cheat
+
+local DeltaUI = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Bypass Anti-Cheat
+local function BypassAntiCheat()
+    -- Anti-Cheat Detection Bypass
+    local mt = getrawmetatable(game)
+    local oldIndex = mt.__index
+    setreadonly(mt, false)
+    
+    mt.__index = newcclosure(function(self, key)
+        if tostring(key) == "WalkSpeed" or tostring(key) == "JumpPower" then
+            return oldIndex(self, key)
+        end
+        return oldIndex(self, key)
+    end)
+    
+    -- Hide from detection
+    local CoreGui = game:GetService("CoreGui")
+    local namecall
+    namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FindFirstChild" or method == "WaitForChild" then
+            local args = {...}
+            if typeof(args[1]) == "string" and args[1]:lower():find("delta") then
+                return nil
+            end
+        end
+        return namecall(self, ...)
+    end))
+    
+    -- Anti Remote Spy
+    local oldRemoteFunction = Instance.new("RemoteFunction")
+    local oldRemoteEvent = Instance.new("RemoteEvent")
+    
+    -- Hook FireServer để tránh detection
+    local oldFireServer = oldRemoteEvent.FireServer
+    oldRemoteEvent.FireServer = function(self, ...)
+        local success, result = pcall(oldFireServer, self, ...)
+        if not success then
+            warn("Blocked by anti-cheat")
+            return
+        end
+        return result
+    end
+    
+    print("[Delta UI] Anti-Cheat Bypass Active")
+end
+
+-- Cấu hình
+local Config = {
+    Aimbot = {
+        Enabled = false,
+        SilentAim = false,
+        HitboxEnabled = true,
+        HitboxSize = Vector3.new(5, 5, 5),
+        FOV = 180,
+        AimPart = "Head",
+        Smoothness = 1,
+        TeamCheck = false,
+        WallCheck = false,
+        Prediction = 0.15,
+        ShowFOV = true,
+        FOVColor = Color3.fromRGB(255, 255, 255),
+        FOVTransparency = 0.3,
+        Keybind = Enum.KeyCode.E,
+        ToggleMode = true,
+        MaxDistance = 500
+    },
+    
+    Hitbox = {
+        Enabled = true,
+        ShowSkeleton = true,
+        SkeletonColor = Color3.fromRGB(0, 255, 0),
+        SkeletonThickness = 2,
+        HitboxColor = Color3.fromRGB(255, 0, 0),
+        HitboxTransparency = 0.4,
+        HitboxSize = 5,
+        AutoUpdate = true,
+        UpdateInterval = 0.05,
+        ShowDistance = true,
+        TargetOnly = false
+    },
+    
+    Speed = {
+        Enabled = false,
+        SpeedValue = 30,
+        Method = "WalkSpeed",
+        Acceleration = 1,
+        Keybind = Enum.KeyCode.LeftShift
+    },
+    
+    UI = {
+        AccentColor = Color3.fromRGB(100, 180, 255),
+        Background = Color3.fromRGB(25, 25, 35),
+        ToggleKey = Enum.KeyCode.RightControl,
+        AnimationSpeed = 0.3
+    }
+}
+
+-- Storage
+local Target = nil
+local HighlightBoxes = {}
+local SkeletonDrawings = {}
+local FOVCircle = nil
+local isAiming = false
+local lastUpdate = 0
+local UIElements = {}
+local TweenObjects = {}
+
+-- Drawing Cache System
+local DrawingCache = {}
+local function GetDrawing(className, properties)
+    local cacheKey = className
+    if not DrawingCache[cacheKey] then
+        DrawingCache[cacheKey] = {}
+    end
+    
+    local drawing = Drawing.new(className)
+    for prop, value in pairs(properties or {}) do
+        pcall(function()
+            drawing[prop] = value
+        end)
+    end
+    return drawing
+end
+
+-- Hàm tạo UI với animation
+function DeltaUI:CreateUI()
+    -- ScreenGui
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "DeltaUIMain"
+    ScreenGui.Parent = game:GetService("CoreGui")
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    -- Main Container
+    local MainContainer = Instance.new("Frame")
+    MainContainer.Name = "MainContainer"
+    MainContainer.Size = UDim2.new(0, 500, 0, 650)
+    MainContainer.Position = UDim2.new(0.5, -250, 0.5, -325)
+    MainContainer.BackgroundTransparency = 1
+    MainContainer.BorderSizePixel = 0
+    MainContainer.Parent = ScreenGui
+    
+    -- Main Frame với shadow
+    local Shadow = Instance.new("Frame")
+    Shadow.Size = UDim2.new(1, 0, 1, 0)
+    Shadow.Position = UDim2.new(0, 5, 0, 5)
+    Shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Shadow.BackgroundTransparency = 0.5
+    Shadow.BorderSizePixel = 0
+    Shadow.Parent = MainContainer
+    
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(1, 0, 1, 0)
+    MainFrame.BackgroundColor3 = Config.UI.Background
+    MainFrame.BorderSizePixel = 0
+    MainFrame.ClipsDescendants = true
+    MainFrame.Parent = MainContainer
+    
+    -- Gradient Background
+    local Gradient = Instance.new("UIGradient")
+    Gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 45)),
+        ColorSequenceKeypoint.new(0.5, Config.UI.Background),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 30))
+    })
+    Gradient.Rotation = 45
+    Gradient.Parent = MainFrame
+    
+    -- Title Bar với animation
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 50)
+    TitleBar.BackgroundColor3 = Config.UI.AccentColor
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    local TitleGradient = Instance.new("UIGradient")
+    TitleGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Config.UI.AccentColor),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 140, 255))
+    })
+    TitleGradient.Rotation = 90
+    TitleGradient.Parent = TitleBar
+    
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Size = UDim2.new(1, -100, 1, 0)
+    TitleText.Position = UDim2.new(0, 20, 0, 0)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Font = Enum.Font.GothamBold
+    TitleText.Text = "DELTA UI"
+    TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleText.TextSize = 24
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.Parent = TitleBar
+    
+    -- Close Button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 40, 0, 40)
+    CloseButton.Position = UDim2.new(1, -45, 0, 5)
+    CloseButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    CloseButton.Text = "×"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.TextSize = 24
+    CloseButton.BorderSizePixel = 0
+    CloseButton.Parent = TitleBar
+    
+    -- Minimize Button
+    local MinimizeButton = Instance.new("TextButton")
+    MinimizeButton.Size = UDim2.new(0, 40, 0, 40)
+    MinimizeButton.Position = UDim2.new(1, -90, 0, 5)
+    MinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
+    MinimizeButton.Text = "—"
+    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinimizeButton.Font = Enum.Font.GothamBold
+    MinimizeButton.TextSize = 20
+    MinimizeButton.BorderSizePixel = 0
+    MinimizeButton.Parent = TitleBar
+    
+    -- Tab System với animation
+    local TabHolder = Instance.new("Frame")
+    TabHolder.Size = UDim2.new(1, 0, 0, 45)
+    TabHolder.Position = UDim2.new(0, 0, 0, 50)
+    TabHolder.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    TabHolder.BorderSizePixel = 0
+    TabHolder.Parent = MainFrame
+    
+    local Tabs = {"⚔️ Combat", "🎯 Hitbox", "⚡ Speed", "🔧 Settings"}
+    local TabButtons = {}
+    local ContentFrames = {}
+    
+    for i, tabName in ipairs(Tabs) do
+        local TabButton = Instance.new("TextButton")
+        TabButton.Size = UDim2.new(1/#Tabs, 0, 1, 0)
+        TabButton.Position = UDim2.new((i-1)/#Tabs, 0, 0, 0)
+        TabButton.BackgroundColor3 = i == 1 and Config.UI.AccentColor or Color3.fromRGB(35, 35, 45)
+        TabButton.Text = tabName
+        TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TabButton.Font = Enum.Font.Gotham
+        TabButton.TextSize = 13
+        TabButton.BorderSizePixel = 0
+        TabButton.AutoButtonColor = false
+        TabButton.Parent = TabHolder
+        TabButtons[i] = TabButton
+        
+        -- Content Frame với scroll
+        local ContentFrame = Instance.new("ScrollingFrame")
+        ContentFrame.Size = UDim2.new(1, -20, 1, -105)
+        ContentFrame.Position = UDim2.new(0, 10, 0, 100)
+        ContentFrame.BackgroundTransparency = 1
+        ContentFrame.BorderSizePixel = 0
+        ContentFrame.ScrollBarThickness = 3
+        ContentFrame.Visible = i == 1
+        ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 700)
+        ContentFrame.ScrollBarImageColor3 = Config.UI.AccentColor
+        ContentFrame.Parent = MainFrame
+        ContentFrames[i] = ContentFrame
+        
+        TabButton.MouseButton1Click:Connect(function()
+            -- Animate tab switching
+            for j, btn in ipairs(TabButtons) do
+                btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+                ContentFrames[j].Visible = false
+            end
+            TabButton.BackgroundColor3 = Config.UI.AccentColor
+            ContentFrame.Visible = true
+            
+            -- Fade in animation
+            ContentFrame.BackgroundTransparency = 1
+            local tween = TweenService:Create(ContentFrame, TweenInfo.new(Config.UI.AnimationSpeed), {BackgroundTransparency = 1})
+            tween:Play()
+        end)
+    end
+    
+    -- Helper functions cho UI components
+    local function CreateToggle(parent, text, config, yOffset)
+        local ToggleFrame = Instance.new("Frame")
+        ToggleFrame.Size = UDim2.new(1, -10, 0, 40)
+        ToggleFrame.Position = UDim2.new(0, 5, 0, yOffset)
+        ToggleFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        ToggleFrame.BorderSizePixel = 0
+        ToggleFrame.Parent = parent
+        
+        local ToggleLabel = Instance.new("TextLabel")
+        ToggleLabel.Size = UDim2.new(0.7, 0, 1, 0)
+        ToggleLabel.Position = UDim2.new(0, 10, 0, 0)
+        ToggleLabel.BackgroundTransparency = 1
+        ToggleLabel.Text = text
+        ToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleLabel.Font = Enum.Font.Gotham
+        ToggleLabel.TextSize = 14
+        ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        ToggleLabel.Parent = ToggleFrame
+        
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Size = UDim2.new(0, 50, 0, 25)
+        ToggleButton.Position = UDim2.new(1, -60, 0.5, -12.5)
+        ToggleButton.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+        ToggleButton.Text = config.Value and "ON" or "OFF"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleButton.Font = Enum.Font.GothamBold
+        ToggleButton.TextSize = 12
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.AutoButtonColor = false
+        ToggleButton.Parent = ToggleFrame
+        
+        ToggleButton.MouseButton1Click:Connect(function()
+            config.Value = not config.Value
+            ToggleButton.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+            ToggleButton.Text = config.Value and "ON" or "OFF"
+            
+            -- Animation
+            local tween = TweenService:Create(ToggleButton, TweenInfo.new(0.2), {Size = UDim2.new(0, 55, 0, 28)})
+            tween:Play()
+            wait(0.1)
+            local tween2 = TweenService:Create(ToggleButton, TweenInfo.new(0.2), {Size = UDim2.new(0, 50, 0, 25)})
+            tween2:Play()
+        end)
+        
+        return ToggleFrame
+    end
+    
+    local function CreateSlider(parent, text, config, min, max, yOffset)
+        local SliderFrame = Instance.new("Frame")
+        SliderFrame.Size = UDim2.new(1, -10, 0, 60)
+        SliderFrame.Position = UDim2.new(0, 5, 0, yOffset)
+        SliderFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        SliderFrame.BorderSizePixel = 0
+        SliderFrame.Parent = parent
+        
+        local SliderLabel = Instance.new("TextLabel")
+        SliderLabel.Size = UDim2.new(1, -20, 0, 25)
+        SliderLabel.Position = UDim2.new(0, 10, 0, 5)
+        SliderLabel.BackgroundTransparency = 1
+        SliderLabel.Text = text .. ": " .. tostring(config.Value)
+        SliderLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        SliderLabel.Font = Enum.Font.Gotham
+        SliderLabel.TextSize = 13
+        SliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+        SliderLabel.Parent = SliderFrame
+        
+        local SliderBar = Instance.new("Frame")
+        SliderBar.Size = UDim2.new(1, -20, 0, 5)
+        SliderBar.Position = UDim2.new(0, 10, 0.7, 0)
+        SliderBar.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+        SliderBar.BorderSizePixel = 0
+        SliderBar.Parent = SliderFrame
+        
+        local SliderFill = Instance.new("Frame")
+        SliderFill.Size = UDim2.new((config.Value - min) / (max - min), 0, 1, 0)
+        SliderFill.BackgroundColor3 = Config.UI.AccentColor
+        SliderFill.BorderSizePixel = 0
+        SliderFill.Parent = SliderBar
+        
+        local SliderButton = Instance.new("TextButton")
+        SliderButton.Size = UDim2.new(0, 15, 0, 15)
+        SliderButton.Position = UDim2.new((config.Value - min) / (max - min), -7.5, 0.5, -7.5)
+        SliderButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        SliderButton.Text = ""
+        SliderButton.BorderSizePixel = 0
+        SliderButton.Parent = SliderBar
+        
+        local function UpdateSlider(input)
+            local mousePos = input.Position.X
+            local barPos = SliderBar.AbsolutePosition.X
+            local barSize = SliderBar.AbsoluteSize.X
+            local percent = math.clamp((mousePos - barPos) / barSize, 0, 1)
+            local value = min + (max - min) * percent
+            config.Value = math.floor(value * 10) / 10
+            SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+            SliderButton.Position = UDim2.new(percent, -7.5, 0.5, -7.5)
+            SliderLabel.Text = text .. ": " .. tostring(config.Value)
+        end
+        
+        SliderButton.MouseButton1Down:Connect(function()
+            local connection
+            connection = Mouse.Move:Connect(function()
+                UpdateSlider(Mouse)
+            end)
+            Mouse.Button1Up:Connect(function()
+                connection:Disconnect()
+            end)
+        end)
+        
+        return SliderFrame
+    end
+    
+    -- Populate tabs với components
+    -- Combat Tab
+    local yOffset = 5
+    CreateToggle(ContentFrames[1], "Enable Aimbot", {Value = Config.Aimbot.Enabled}, yOffset)
+    Config.Aimbot.Enabled = false
+    yOffset += 45
+    CreateToggle(ContentFrames[1], "Silent Aim", {Value = Config.Aimbot.SilentAim}, yOffset)
+    yOffset += 45
+    CreateToggle(ContentFrames[1], "Show FOV", {Value = Config.Aimbot.ShowFOV}, yOffset)
+    yOffset += 45
+    CreateSlider(ContentFrames[1], "FOV Size", {Value = Config.Aimbot.FOV}, 10, 500, yOffset)
+    yOffset += 65
+    CreateSlider(ContentFrames[1], "Smoothness", {Value = Config.Aimbot.Smoothness}, 1, 10, yOffset)
+    yOffset += 65
+    CreateSlider(ContentFrames[1], "Prediction", {Value = Config.Aimbot.Prediction}, 0, 1, yOffset)
+    yOffset += 65
+    
+    -- Hitbox Tab
+    yOffset = 5
+    CreateToggle(ContentFrames[2], "Enable Hitbox", {Value = Config.Hitbox.Enabled}, yOffset)
+    yOffset += 45
+    CreateToggle(ContentFrames[2], "Show Skeleton", {Value = Config.Hitbox.ShowSkeleton}, yOffset)
+    yOffset += 45
+    CreateSlider(ContentFrames[2], "Hitbox Size", {Value = Config.Hitbox.HitboxSize}, 1, 20, yOffset)
+    yOffset += 65
+    
+    -- Speed Tab
+    yOffset = 5
+    CreateToggle(ContentFrames[3], "Enable Speed", {Value = Config.Speed.Enabled}, yOffset)
+    yOffset += 45
+    CreateSlider(ContentFrames[3], "Speed Value", {Value = Config.Speed.SpeedValue}, 16, 100, yOffset)
+    yOffset += 65
+    
+    -- Settings Tab
+    yOffset = 5
+    CreateToggle(ContentFrames[4], "Anti-Cheat Bypass", {Value = true}, yOffset)
+    yOffset += 45
+    
+    -- Animation functions
+    local function ToggleMenu(visible)
+        local targetPosition = visible and UDim2.new(0.5, -250, 0.5, -325) or UDim2.new(0.5, -250, -1, -325)
+        local tween = TweenService:Create(MainContainer, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = targetPosition})
+        tween:Play()
+    end
+    
+    local isMinimized = false
+    local function ToggleMinimize()
+        isMinimized = not isMinimized
+        local targetSize = isMinimized and UDim2.new(1, 0, 0, 50) or UDim2.new(1, 0, 1, 0)
+        local tween = TweenService:Create(MainFrame, TweenInfo.new(0.3), {Size = targetSize})
+        tween:Play()
+    end
+    
+    -- Connect buttons
+    CloseButton.MouseButton1Click:Connect(function()
+        ToggleMenu(false)
+        wait(0.5)
+        ScreenGui.Enabled = false
+    end)
+    
+    MinimizeButton.MouseButton1Click:Connect(ToggleMinimize)
+    
+    -- Draggable
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    TitleBar.MouseButton1Down:Connect(function()
+        dragging = true
+        dragStart = Mouse.Position
+        startPos = MainContainer.Position
+    end)
+    
+    Mouse.Move:Connect(function()
+        if dragging then
+            local delta = Mouse.Position - dragStart
+            MainContainer.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    Mouse.Button1Up:Connect(function()
+        dragging = false
+    end)
+    
+    UIElements.MainContainer = MainContainer
+    UIElements.ScreenGui = ScreenGui
+    
+    return ScreenGui, ToggleMenu
+end
+
+-- Hàm kiểm tra visibility
+local function IsVisible(target)
+    if not Config.Aimbot.WallCheck then return true end
+    
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return false end
+    
+    local origin = Camera.CFrame.Position
+    local targetPos = target.Position
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character, target.Parent}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local raycastResult = workspace:Raycast(origin, targetPos - origin, raycastParams)
+    
+    return not raycastResult
+end
+
+-- Hàm lấy target
+local function GetClosestTarget()
+    local closestTarget = nil
+    local closestDistance = Config.Aimbot.FOV
+    
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if Config.Aimbot.TeamCheck and player.Team == LocalPlayer.Team then
+                continue
+            end
+            
+            local targetChar = player.Character
+            if targetChar then
+                local humanoid = targetChar:FindFirstChild("Humanoid")
+                local targetPart = targetChar:FindFirstChild(Config.Aimbot.AimPart) or targetChar:FindFirstChild("Head")
+                
+                if humanoid and humanoid.Health > 0 and targetPart then
+                    local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                    
+                    if onScreen then
+                        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        
+                        if distance < closestDistance and IsVisible(targe
