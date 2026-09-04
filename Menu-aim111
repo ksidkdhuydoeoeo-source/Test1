@@ -1,0 +1,377 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local Config = {
+    Aimbot = {Enabled = false, SilentAim = false, FOV = 150, AimPart = "Head", Smoothness = 1, ShowFOV = true, Keybind = Enum.KeyCode.E},
+    Hitbox = {Enabled = true, ShowSkeleton = true, HitboxSize = 5},
+    Speed = {Enabled = false, SpeedValue = 30}
+}
+
+local Target, FOVCircle, isAiming = nil, nil, false
+local ScreenGui, MainContainer
+local HighlightBoxes = {}
+local isMenuOpen = true
+
+local function CreateDrawing(t, p)
+    local s, d = pcall(function()
+        local dr = Drawing.new(t)
+        for k, v in pairs(p or {}) do pcall(function() dr[k] = v end) end
+        return dr
+    end)
+    return s and d or nil
+end
+
+local function CreateUI()
+    if ScreenGui then ScreenGui:Destroy() end
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "DeltaUI"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    MainContainer = Instance.new("Frame")
+    MainContainer.Size = UDim2.new(0, 450, 0, 550)
+    MainContainer.Position = UDim2.new(0.5, -225, 0.5, -275)
+    MainContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    MainContainer.BorderSizePixel = 0
+    MainContainer.Active = true
+    MainContainer.Draggable = true
+    MainContainer.Parent = ScreenGui
+    
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainContainer
+    
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Size = UDim2.new(1, -80, 1, 0)
+    TitleText.Position = UDim2.new(0, 20, 0, 0)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Font = Enum.Font.GothamBold
+    TitleText.Text = "DELTA UI"
+    TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleText.TextSize = 20
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.Parent = TitleBar
+    
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 40, 0, 40)
+    CloseButton.Position = UDim2.new(1, -40, 0, 0)
+    CloseButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    CloseButton.Text = "X"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.TextSize = 18
+    CloseButton.BorderSizePixel = 0
+    CloseButton.Parent = TitleBar
+    
+    CloseButton.MouseButton1Click:Connect(function()
+        isMenuOpen = false
+        ScreenGui.Enabled = false
+    end)
+    
+    local TabHolder = Instance.new("Frame")
+    TabHolder.Size = UDim2.new(1, 0, 0, 35)
+    TabHolder.Position = UDim2.new(0, 0, 0, 40)
+    TabHolder.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    TabHolder.BorderSizePixel = 0
+    TabHolder.Parent = MainContainer
+    
+    local Tabs = {"Aimbot", "Hitbox", "Speed"}
+    local TabButtons = {}
+    local ContentFrames = {}
+    
+    for i, tabName in ipairs(Tabs) do
+        local TabButton = Instance.new("TextButton")
+        TabButton.Size = UDim2.new(1/3, 0, 1, 0)
+        TabButton.Position = UDim2.new((i-1)/3, 0, 0, 0)
+        TabButton.BackgroundColor3 = i == 1 and Color3.fromRGB(100, 180, 255) or Color3.fromRGB(40, 40, 50)
+        TabButton.Text = tabName
+        TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TabButton.Font = Enum.Font.Gotham
+        TabButton.TextSize = 13
+        TabButton.BorderSizePixel = 0
+        TabButton.AutoButtonColor = false
+        TabButton.Parent = TabHolder
+        TabButtons[i] = TabButton
+        
+        local ContentFrame = Instance.new("ScrollingFrame")
+        ContentFrame.Size = UDim2.new(1, -10, 1, -80)
+        ContentFrame.Position = UDim2.new(0, 5, 0, 80)
+        ContentFrame.BackgroundTransparency = 1
+        ContentFrame.BorderSizePixel = 0
+        ContentFrame.ScrollBarThickness = 3
+        ContentFrame.Visible = i == 1
+        ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 400)
+        ContentFrame.Parent = MainContainer
+        ContentFrames[i] = ContentFrame
+        
+        TabButton.MouseButton1Click:Connect(function()
+            for j, btn in ipairs(TabButtons) do
+                btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+                ContentFrames[j].Visible = false
+            end
+            TabButton.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+            ContentFrame.Visible = true
+        end)
+    end
+    
+    local function AddToggle(parent, text, config, y)
+        local f = Instance.new("Frame")
+        f.Size = UDim2.new(1, 0, 0, 35)
+        f.Position = UDim2.new(0, 0, 0, y)
+        f.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        f.BorderSizePixel = 0
+        f.Parent = parent
+        
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(0.7, 0, 1, 0)
+        l.Position = UDim2.new(0, 10, 0, 0)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = Color3.fromRGB(255, 255, 255)
+        l.Font = Enum.Font.Gotham
+        l.TextSize = 14
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = f
+        
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, 60, 0, 25)
+        b.Position = UDim2.new(1, -70, 0.5, -12.5)
+        b.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+        b.Text = config.Value and "ON" or "OFF"
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 12
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Parent = f
+        
+        b.MouseButton1Click:Connect(function()
+            config.Value = not config.Value
+            b.BackgroundColor3 = config.Value and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 100)
+            b.Text = config.Value and "ON" or "OFF"
+        end)
+    end
+    
+    local function AddSlider(parent, text, config, min, max, y)
+        local f = Instance.new("Frame")
+        f.Size = UDim2.new(1, 0, 0, 55)
+        f.Position = UDim2.new(0, 0, 0, y)
+        f.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        f.BorderSizePixel = 0
+        f.Parent = parent
+        
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -10, 0, 20)
+        l.Position = UDim2.new(0, 5, 0, 5)
+        l.BackgroundTransparency = 1
+        l.Text = text .. ": " .. tostring(config.Value)
+        l.TextColor3 = Color3.fromRGB(255, 255, 255)
+        l.Font = Enum.Font.Gotham
+        l.TextSize = 12
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = f
+        
+        local input = Instance.new("TextBox")
+        input.Size = UDim2.new(1, -10, 0, 25)
+        input.Position = UDim2.new(0, 5, 0, 25)
+        input.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+        input.Text = tostring(config.Value)
+        input.TextColor3 = Color3.fromRGB(255, 255, 255)
+        input.Font = Enum.Font.Gotham
+        input.TextSize = 12
+        input.BorderSizePixel = 0
+        input.Parent = f
+        
+        input.FocusLost:Connect(function()
+            local num = tonumber(input.Text)
+            if num then
+                config.Value = math.clamp(num, min, max)
+                l.Text = text .. ": " .. tostring(config.Value)
+            end
+        end)
+    end
+    
+    local y = 5
+    AddToggle(ContentFrames[1], "Enable Aimbot", {Value = Config.Aimbot.Enabled}, y)
+    Config.Aimbot.Enabled = false
+    y += 40
+    AddToggle(ContentFrames[1], "Silent Aim", {Value = Config.Aimbot.SilentAim}, y)
+    y += 40
+    AddToggle(ContentFrames[1], "Show FOV", {Value = Config.Aimbot.ShowFOV}, y)
+    y += 40
+    AddSlider(ContentFrames[1], "FOV Size", {Value = Config.Aimbot.FOV}, 10, 300, y)
+    y += 60
+    AddSlider(ContentFrames[1], "Smoothness", {Value = Config.Aimbot.Smoothness}, 1, 10, y)
+    
+    y = 5
+    AddToggle(ContentFrames[2], "Enable Hitbox", {Value = Config.Hitbox.Enabled}, y)
+    Config.Hitbox.Enabled = true
+    y += 40
+    AddToggle(ContentFrames[2], "Show Skeleton", {Value = Config.Hitbox.ShowSkeleton}, y)
+    y += 40
+    AddSlider(ContentFrames[2], "Hitbox Size", {Value = Config.Hitbox.HitboxSize}, 1, 20, y)
+    
+    y = 5
+    AddToggle(ContentFrames[3], "Enable Speed", {Value = Config.Speed.Enabled}, y)
+    Config.Speed.Enabled = false
+    y += 40
+    AddSlider(ContentFrames[3], "Speed Value", {Value = Config.Speed.SpeedValue}, 16, 100, y)
+end
+
+local function GetClosestTarget()
+    local closest, closestDist = nil, Config.Aimbot.FOV
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local hum = plr.Character:FindFirstChild("Humanoid")
+            local part = plr.Character:FindFirstChild(Config.Aimbot.AimPart) or plr.Character:FindFirstChild("Head")
+            if hum and hum.Health > 0 and part then
+                local pos, onScreen = Camera:WorldToScreenPoint(part.Position)
+                if onScreen then
+                    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if dist < closestDist then
+                        closest, closestDist = part, dist
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function AimAt(target)
+    if not target then return end
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    if Config.Aimbot.SilentAim then
+        Target = target
+    else
+        local lookAt = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+        if Config.Aimbot.Smoothness > 1 then
+            Camera.CFrame = Camera.CFrame:Lerp(lookAt, Config.Aimbot.Smoothness * 0.1)
+        else
+            Camera.CFrame = lookAt
+        end
+    end
+end
+
+local function DrawFOV()
+    if FOVCircle then pcall(function() FOVCircle:Remove() end) FOVCircle = nil end
+    if Config.Aimbot.ShowFOV then
+        FOVCircle = CreateDrawing("Circle", {
+            Visible = true, Radius = Config.Aimbot.FOV,
+            Color = Color3.fromRGB(255, 255, 255), Transparency = 0.5, Thickness = 2,
+            Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        })
+    end
+end
+
+local function DrawHitbox(target, index)
+    if not target or not target.Parent then return end
+    local char = target.Parent
+    local hum = char:FindFirstChild("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root or not hum or hum.Health <= 0 then return end
+    
+    if HighlightBoxes[index] then
+        for _, d in ipairs(HighlightBoxes[index]) do pcall(function() d:Remove() end) end
+    end
+    HighlightBoxes[index] = {}
+    
+    local pos = Camera:WorldToScreenPoint(root.Position)
+    local size = Config.Hitbox.HitboxSize * 10
+    local box = CreateDrawing("Square", {
+        Visible = true, Color = Color3.fromRGB(255, 0, 0), Transparency = 0.5, Thickness = 2,
+        Size = Vector2.new(size, size * 2), Position = Vector2.new(pos.X, pos.Y)
+    })
+    if box then table.insert(HighlightBoxes[index], box) end
+    
+    if Config.Hitbox.ShowSkeleton then
+        local connections = {
+            {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"LowerTorso", "HumanoidRootPart"},
+            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+        }
+        for _, conn in ipairs(connections) do
+            local p1, p2 = char:FindFirstChild(conn[1]), char:FindFirstChild(conn[2])
+            if p1 and p2 then
+                local sp1, sp2 = Camera:WorldToScreenPoint(p1.Position), Camera:WorldToScreenPoint(p2.Position)
+                if sp1.Z > 0 and sp2.Z > 0 then
+                    local line = CreateDrawing("Line", {
+                        Visible = true, Color = Color3.fromRGB(0, 255, 0), Thickness = 2,
+                        From = Vector2.new(sp1.X, sp1.Y), To = Vector2.new(sp2.X, sp2.Y)
+                    })
+                    if line then table.insert(HighlightBoxes[index], line) end
+                end
+            end
+        end
+    end
+end
+
+local function MainLoop()
+    if Config.Speed.Enabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then hum.WalkSpeed = Config.Speed.SpeedValue end
+    end
+    
+    if Config.Aimbot.Enabled then
+        local pressed = UserInputService:IsKeyDown(Config.Aimbot.Keybind)
+        if pressed ~= isAiming then
+            isAiming = pressed
+            wait(0.1)
+        end
+        if isAiming then
+            local target = GetClosestTarget()
+            if target then AimAt(target) Target = target end
+        end
+    end
+    
+    if Config.Hitbox.Enabled then
+        for _, drawings in pairs(HighlightBoxes) do
+            for _, d in ipairs(drawings) do pcall(function() d:Remove() end) end
+        end
+        HighlightBoxes = {}
+        local index = 0
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local hum = plr.Character:FindFirstChild("Humanoid")
+                local root = plr.Character:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and root then
+                    index += 1
+                    DrawHitbox(root, index)
+                end
+            end
+        end
+    end
+    
+    if Config.Aimbot.ShowFOV and FOVCircle then
+        pcall(function()
+            FOVCircle.Radius = Config.Aimbot.FOV
+            FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        end)
+    end
+end
+
+pcall(CreateUI)
+pcall(DrawFOV)
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.RightControl and ScreenGui then
+        isMenuOpen = not isMenuOpen
+        ScreenGui.Enabled = isMenuOpen
+    end
+end)
+
+RunService.RenderStepped:Connect(MainLoop)
+
+print("[Delta UI] Loaded! RightControl để đóng/mở menu")
