@@ -1,0 +1,1277 @@
+--[[
+    XiBoDepZaiVIP V3
+    Client/Admin Debug Menu
+    Place: StarterGui
+    Recommended: use only in your own Roblox experience.
+
+    Features:
+    - Draggable mobile/PC menu
+    - Speed + slider
+    - High Jump + slider
+    - Smart Aim / Aim Assist
+    - Adjustable Aim FOV
+    - Enemy ESP
+    - No Clip
+    - Ultra Performance V3
+    - Reversible performance changes
+    - Optimized effect scanning
+]]
+
+--==================================================
+-- SERVICES
+--==================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+--==================================================
+-- CONFIG / STATE
+--==================================================
+
+local State = {
+    SpeedEnabled = false,
+    Speed = 50,
+
+    JumpEnabled = false,
+    JumpPower = 100,
+
+    AimEnabled = false,
+    AimFOV = 150,
+    AimSmoothness = 0.18,
+
+    ESPEnabled = false,
+
+    NoClipEnabled = false,
+
+    PerformanceEnabled = false,
+}
+
+local CONFIG = {
+    MinSpeed = 16,
+    MaxSpeed = 100,
+
+    MinJump = 50,
+    MaxJump = 150,
+
+    MinFOV = 50,
+    MaxFOV = 400,
+
+    ESPRefresh = 0.20,
+
+    PerformanceScanInterval = 1.5,
+}
+
+--==================================================
+-- HELPERS
+--==================================================
+
+local function getCharacter()
+    return LocalPlayer.Character
+end
+
+local function getHumanoid()
+    local character = getCharacter()
+
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot(character)
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function clamp(value, minValue, maxValue)
+    return math.clamp(value, minValue, maxValue)
+end
+
+local function isEnemy(player)
+    if player == LocalPlayer then
+        return false
+    end
+
+    if LocalPlayer.Team ~= nil and player.Team ~= nil then
+        return LocalPlayer.Team ~= player.Team
+    end
+
+    return true
+end
+
+local function getTargetPart(character)
+    return character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChild("HumanoidRootPart")
+end
+
+--==================================================
+-- GUI ROOT
+--==================================================
+
+local oldGui = PlayerGui:FindFirstChild("XiBoDepZaiVIP")
+
+if oldGui then
+    oldGui:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "XiBoDepZaiVIP"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+--==================================================
+-- OPEN BUTTON
+--==================================================
+
+local OpenButton = Instance.new("TextButton")
+OpenButton.Name = "OpenButton"
+OpenButton.Size = UDim2.fromOffset(58, 58)
+OpenButton.Position = UDim2.new(0, 15, 0.5, -29)
+OpenButton.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+OpenButton.Text = "VIP"
+OpenButton.TextColor3 = Color3.new(1, 1, 1)
+OpenButton.TextSize = 17
+OpenButton.Font = Enum.Font.GothamBold
+OpenButton.AutoButtonColor = true
+OpenButton.Parent = ScreenGui
+
+local OpenCorner = Instance.new("UICorner")
+OpenCorner.CornerRadius = UDim.new(1, 0)
+OpenCorner.Parent = OpenButton
+
+local OpenStroke = Instance.new("UIStroke")
+OpenStroke.Thickness = 1.5
+OpenStroke.Color = Color3.fromRGB(100, 100, 110)
+OpenStroke.Parent = OpenButton
+
+--==================================================
+-- MAIN FRAME
+--==================================================
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.fromOffset(350, 535)
+Main.Position = UDim2.new(0.5, -175, 0.5, -267)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+Main.BorderSizePixel = 0
+Main.Visible = true
+Main.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 14)
+MainCorner.Parent = Main
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 1.5
+MainStroke.Color = Color3.fromRGB(65, 65, 75)
+MainStroke.Parent = Main
+
+--==================================================
+-- TITLE BAR
+--==================================================
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 52)
+TitleBar.BackgroundColor3 = Color3.fromRGB(27, 27, 33)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = Main
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 14)
+TitleCorner.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.fromOffset(16, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "XiBoDepZai • VIP V3"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.fromOffset(40, 40)
+CloseButton.Position = UDim2.new(1, -46, 0, 6)
+CloseButton.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+CloseButton.Text = "×"
+CloseButton.TextColor3 = Color3.new(1, 1, 1)
+CloseButton.TextSize = 24
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 10)
+CloseCorner.Parent = CloseButton
+
+--==================================================
+-- DRAG SYSTEM
+--==================================================
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPosition = nil
+
+local function updateDrag(input)
+    if not dragStart or not startPosition then
+        return
+    end
+
+    local delta = input.Position - dragStart
+
+    Main.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
+end
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Main.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        updateDrag(input)
+    end
+end)
+
+--==================================================
+-- SCROLL AREA
+--==================================================
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Name = "Scroll"
+Scroll.Position = UDim2.fromOffset(8, 60)
+Scroll.Size = UDim2.new(1, -16, 1, -68)
+Scroll.BackgroundTransparency = 1
+Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 4
+Scroll.CanvasSize = UDim2.new()
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+Scroll.Parent = Main
+
+local Padding = Instance.new("UIPadding")
+Padding.PaddingTop = UDim.new(0, 4)
+Padding.PaddingBottom = UDim.new(0, 10)
+Padding.PaddingLeft = UDim.new(0, 4)
+Padding.PaddingRight = UDim.new(0, 4)
+Padding.Parent = Scroll
+
+local List = Instance.new("UIListLayout")
+List.Padding = UDim.new(0, 8)
+List.SortOrder = Enum.SortOrder.LayoutOrder
+List.Parent = Scroll
+
+--==================================================
+-- UI FACTORIES
+--==================================================
+
+local function createSection(text)
+    local label = Instance.new("TextLabel")
+
+    label.Size = UDim2.new(1, -4, 0, 28)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(150, 150, 160)
+    label.TextSize = 12
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = Scroll
+
+    return label
+end
+
+local function createToggle(text, defaultValue, callback)
+    local button = Instance.new("TextButton")
+
+    button.Size = UDim2.new(1, -4, 0, 48)
+    button.BackgroundColor3 = Color3.fromRGB(29, 29, 35)
+    button.Text = ""
+    button.AutoButtonColor = true
+    button.Parent = Scroll
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = button
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -75, 1, 0)
+    label.Position = UDim2.fromOffset(14, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamMedium
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = button
+
+    local indicator = Instance.new("TextLabel")
+    indicator.Size = UDim2.fromOffset(48, 26)
+    indicator.Position = UDim2.new(1, -58, 0.5, -13)
+    indicator.BackgroundColor3 = Color3.fromRGB(55, 55, 63)
+    indicator.TextColor3 = Color3.new(1, 1, 1)
+    indicator.TextSize = 11
+    indicator.Font = Enum.Font.GothamBold
+    indicator.Parent = button
+
+    local indicatorCorner = Instance.new("UICorner")
+    indicatorCorner.CornerRadius = UDim.new(1, 0)
+    indicatorCorner.Parent = indicator
+
+    local enabled = defaultValue
+
+    local function refresh()
+        indicator.Text = enabled and "ON" or "OFF"
+
+        if enabled then
+            indicator.BackgroundColor3 = Color3.fromRGB(55, 150, 90)
+        else
+            indicator.BackgroundColor3 = Color3.fromRGB(55, 55, 63)
+        end
+    end
+
+    button.Activated:Connect(function()
+        enabled = not enabled
+        refresh()
+        callback(enabled)
+    end)
+
+    refresh()
+
+    return button
+end
+
+local function createSlider(text, minValue, maxValue, defaultValue, callback)
+    local holder = Instance.new("Frame")
+
+    holder.Size = UDim2.new(1, -4, 0, 70)
+    holder.BackgroundColor3 = Color3.fromRGB(29, 29, 35)
+    holder.BorderSizePixel = 0
+    holder.Parent = Scroll
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = holder
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -28, 0, 24)
+    label.Position = UDim2.fromOffset(14, 6)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextSize = 13
+    label.Font = Enum.Font.GothamMedium
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = holder
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, -28, 0, 7)
+    bar.Position = UDim2.fromOffset(14, 43)
+    bar.BackgroundColor3 = Color3.fromRGB(55, 55, 63)
+    bar.BorderSizePixel = 0
+    bar.Parent = holder
+
+    local barCorner = Instance.new("UICorner")
+    barCorner.CornerRadius = UDim.new(1, 0)
+    barCorner.Parent = bar
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.fromScale(0, 1)
+    fill.BackgroundColor3 = Color3.fromRGB(90, 150, 255)
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent = fill
+
+    local knob = Instance.new("Frame")
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Size = UDim2.fromOffset(16, 16)
+    knob.Position = UDim2.fromScale(0, 0.5)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    knob.BorderSizePixel = 0
+    knob.Parent = bar
+
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local currentValue = clamp(defaultValue, minValue, maxValue)
+    local sliding = false
+
+    local function setValueFromX(x)
+        local relative = clamp(
+            x - bar.AbsolutePosition.X,
+            0,
+            bar.AbsoluteSize.X
+        )
+
+        local alpha = relative / bar.AbsoluteSize.X
+
+        currentValue = math.floor(
+            minValue + ((maxValue - minValue) * alpha) + 0.5
+        )
+
+        local normalized =
+            (currentValue - minValue) / (maxValue - minValue)
+
+        fill.Size = UDim2.fromScale(normalized, 1)
+        knob.Position = UDim2.fromScale(normalized, 0.5)
+
+        label.Text = string.format(
+            "%s: %d",
+            text,
+            currentValue
+        )
+
+        callback(currentValue)
+    end
+
+    local function beginSlide(input)
+        sliding = true
+        setValueFromX(input.Position.X)
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            beginSlide(input)
+        end
+    end)
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            beginSlide(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not sliding then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            setValueFromX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            sliding = false
+        end
+    end)
+
+    task.defer(function()
+        local normalized =
+            (currentValue - minValue) / (maxValue - minValue)
+
+        fill.Size = UDim2.fromScale(normalized, 1)
+        knob.Position = UDim2.fromScale(normalized, 0.5)
+
+        label.Text = string.format(
+            "%s: %d",
+            text,
+            currentValue
+        )
+
+        callback(currentValue)
+    end)
+
+    return holder
+end
+
+--==================================================
+-- MOVEMENT
+--==================================================
+
+createSection("MOVEMENT")
+
+createToggle(
+    "Speed",
+    State.SpeedEnabled,
+    function(value)
+        State.SpeedEnabled = value
+    end
+)
+
+createSlider(
+    "Speed",
+    CONFIG.MinSpeed,
+    CONFIG.MaxSpeed,
+    State.Speed,
+    function(value)
+        State.Speed = value
+    end
+)
+
+createToggle(
+    "High Jump",
+    State.JumpEnabled,
+    function(value)
+        State.JumpEnabled = value
+    end
+)
+
+createSlider(
+    "Jump Power",
+    CONFIG.MinJump,
+    CONFIG.MaxJump,
+    State.JumpPower,
+    function(value)
+        State.JumpPower = value
+    end
+)
+
+--==================================================
+-- AIM
+--==================================================
+
+createSection("AIM ASSIST")
+
+createToggle(
+    "Smart Aim",
+    State.AimEnabled,
+    function(value)
+        State.AimEnabled = value
+    end
+)
+
+createSlider(
+    "Aim FOV",
+    CONFIG.MinFOV,
+    CONFIG.MaxFOV,
+    State.AimFOV,
+    function(value)
+        State.AimFOV = value
+    end
+)
+
+--==================================================
+-- ESP
+--==================================================
+
+createSection("PLAYER ESP")
+
+createToggle(
+    "Enemy ESP",
+    State.ESPEnabled,
+    function(value)
+        State.ESPEnabled = value
+    end
+)
+
+--==================================================
+-- DEBUG
+--==================================================
+
+createSection("DEBUG")
+
+createToggle(
+    "No Clip",
+    State.NoClipEnabled,
+    function(value)
+        State.NoClipEnabled = value
+    end
+)
+
+--==================================================
+-- PERFORMANCE V3
+--==================================================
+
+createSection("PERFORMANCE")
+
+createToggle(
+    "Ultra Performance V3",
+    State.PerformanceEnabled,
+    function(value)
+        State.PerformanceEnabled = value
+    end
+)
+
+--==================================================
+-- FOV CIRCLE
+--==================================================
+
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "AimFOV"
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Visible = false
+FOVCircle.ZIndex = 20
+FOVCircle.Parent = ScreenGui
+
+local FOVCorner = Instance.new("UICorner")
+FOVCorner.CornerRadius = UDim.new(1, 0)
+FOVCorner.Parent = FOVCircle
+
+local FOVStroke = Instance.new("UIStroke")
+FOVStroke.Thickness = 1.5
+FOVStroke.Color = Color3.fromRGB(90, 150, 255)
+FOVStroke.Transparency = 0.15
+FOVStroke.Parent = FOVCircle
+
+--==================================================
+-- AIM SYSTEM
+--==================================================
+
+local function hasLineOfSight(targetPart)
+    local character = getCharacter()
+
+    if not character or not targetPart then
+        return false
+    end
+
+    local camera = workspace.CurrentCamera
+
+    if not camera then
+        return false
+    end
+
+    local origin = camera.CFrame.Position
+    local direction = targetPart.Position - origin
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {character}
+    params.IgnoreWater = true
+
+    local result = workspace:Raycast(
+        origin,
+        direction,
+        params
+    )
+
+    if not result then
+        return true
+    end
+
+    return result.Instance:IsDescendantOf(
+        targetPart.Parent
+    )
+end
+
+local function getClosestVisibleEnemy()
+    local camera = workspace.CurrentCamera
+
+    if not camera then
+        return nil
+    end
+
+    local viewport = camera.ViewportSize
+    local center = Vector2.new(
+        viewport.X / 2,
+        viewport.Y / 2
+    )
+
+    local bestPlayer = nil
+    local bestScore = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isEnemy(player) then
+            local character = player.Character
+            local humanoid =
+                character and character:FindFirstChildOfClass("Humanoid")
+
+            local targetPart =
+                character and getTargetPart(character)
+
+            if humanoid
+                and humanoid.Health > 0
+                and targetPart then
+
+                local screenPosition, visible =
+                    camera:WorldToViewportPoint(
+                        targetPart.Position
+                    )
+
+                if visible and screenPosition.Z > 0 then
+                    local screenPoint = Vector2.new(
+                        screenPosition.X,
+                        screenPosition.Y
+                    )
+
+                    local screenDistance =
+                        (screenPoint - center).Magnitude
+
+                    if screenDistance <= State.AimFOV then
+                        if hasLineOfSight(targetPart) then
+                            local root = getRoot(character)
+
+                            local worldDistance = 0
+
+                            if root and getRoot(getCharacter()) then
+                                worldDistance =
+                                    (root.Position
+                                    - getRoot(getCharacter()).Position).Magnitude
+                            end
+
+                            local score =
+                                screenDistance
+                                + (worldDistance * 0.01)
+
+                            if score < bestScore then
+                                bestScore = score
+                                bestPlayer = player
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPlayer
+end
+
+local function updateAim()
+    if not State.AimEnabled then
+        return
+    end
+
+    local camera = workspace.CurrentCamera
+
+    if not camera then
+        return
+    end
+
+    local targetPlayer = getClosestVisibleEnemy()
+
+    if not targetPlayer then
+        return
+    end
+
+    local targetCharacter = targetPlayer.Character
+    local targetPart =
+        targetCharacter and getTargetPart(targetCharacter)
+
+    if not targetPart then
+        return
+    end
+
+    local desired =
+        CFrame.lookAt(
+            camera.CFrame.Position,
+            targetPart.Position
+        )
+
+    camera.CFrame =
+        camera.CFrame:Lerp(
+            desired,
+            State.AimSmoothness
+        )
+end
+
+--==================================================
+-- ESP SYSTEM
+--==================================================
+
+local ESPObjects = {}
+
+local function removeESP(player)
+    local data = ESPObjects[player]
+
+    if not data then
+        return
+    end
+
+    if data.Highlight then
+        data.Highlight:Destroy()
+    end
+
+    if data.Billboard then
+        data.Billboard:Destroy()
+    end
+
+    ESPObjects[player] = nil
+end
+
+local function createESP(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    if not State.ESPEnabled then
+        return
+    end
+
+    if not isEnemy(player) then
+        return
+    end
+
+    local character = player.Character
+
+    if not character then
+        return
+    end
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    local root =
+        character:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not root or humanoid.Health <= 0 then
+        return
+    end
+
+    removeESP(player)
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "XiBoESP"
+    highlight.Adornee = character
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = Color3.fromRGB(220, 60, 60)
+    highlight.FillTransparency = 0.78
+    highlight.OutlineColor = Color3.fromRGB(255, 80, 80)
+    highlight.OutlineTransparency = 0.1
+    highlight.Parent = character
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "XiBoESPName"
+    billboard.Adornee = root
+    billboard.Size = UDim2.fromOffset(150, 30)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = character
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.fromScale(1, 1)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.DisplayName
+    nameLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+    nameLabel.TextStrokeTransparency = 0.35
+    nameLabel.TextSize = 13
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = billboard
+
+    ESPObjects[player] = {
+        Highlight = highlight,
+        Billboard = billboard,
+    }
+end
+
+local function refreshESP()
+    if not State.ESPEnabled then
+        for player in pairs(ESPObjects) do
+            removeESP(player)
+        end
+
+        return
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if isEnemy(player) then
+                createESP(player)
+            else
+                removeESP(player)
+            end
+        end
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+
+        if State.ESPEnabled then
+            createESP(player)
+        end
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+
+            if State.ESPEnabled then
+                createESP(player)
+            end
+        end)
+    end
+end
+
+--==================================================
+-- PERFORMANCE V3
+--==================================================
+
+local PerformanceBackup = {}
+local PerformanceConnection = nil
+local PerformanceScanRunning = false
+
+local EFFECT_CLASSES = {
+    ParticleEmitter = true,
+    Trail = true,
+    Beam = true,
+    Smoke = true,
+    Fire = true,
+    Sparkles = true,
+
+    BloomEffect = true,
+    BlurEffect = true,
+    DepthOfFieldEffect = true,
+    SunRaysEffect = true,
+    ColorCorrectionEffect = true,
+}
+
+local function backupProperty(instance, property)
+    if not instance then
+        return
+    end
+
+    PerformanceBackup[instance] =
+        PerformanceBackup[instance] or {}
+
+    if PerformanceBackup[instance][property] ~= nil then
+        return
+    end
+
+    local success, value =
+        pcall(function()
+            return instance[property]
+        end)
+
+    if success then
+        PerformanceBackup[instance][property] = value
+    end
+end
+
+local function disableEffect(instance)
+    if not EFFECT_CLASSES[instance.ClassName] then
+        return
+    end
+
+    local success = pcall(function()
+        backupProperty(instance, "Enabled")
+        instance.Enabled = false
+    end)
+
+    return success
+end
+
+local function optimizeInstance(instance)
+    if not State.PerformanceEnabled then
+        return
+    end
+
+    disableEffect(instance)
+
+    -- Client-only lighting optimizations.
+    if instance == Lighting then
+        backupProperty(Lighting, "GlobalShadows")
+        backupProperty(Lighting, "EnvironmentDiffuseScale")
+        backupProperty(Lighting, "EnvironmentSpecularScale")
+
+        pcall(function()
+            Lighting.GlobalShadows = false
+            Lighting.EnvironmentDiffuseScale = 0
+            Lighting.EnvironmentSpecularScale = 0
+        end)
+    end
+end
+
+local function scanPerformance()
+    if PerformanceScanRunning then
+        return
+    end
+
+    if not State.PerformanceEnabled then
+        return
+    end
+
+    PerformanceScanRunning = true
+
+    local descendants = game:GetDescendants()
+
+    for index, instance in ipairs(descendants) do
+        if not State.PerformanceEnabled then
+            break
+        end
+
+        optimizeInstance(instance)
+
+        -- Yield periodically so the optimization scan
+        -- does not freeze the client.
+        if index % 250 == 0 then
+            task.wait()
+        end
+    end
+
+    PerformanceScanRunning = false
+end
+
+local function enablePerformance()
+    if PerformanceConnection then
+        PerformanceConnection:Disconnect()
+        PerformanceConnection = nil
+    end
+
+    -- Lighting backup.
+    backupProperty(Lighting, "GlobalShadows")
+    backupProperty(Lighting, "EnvironmentDiffuseScale")
+    backupProperty(Lighting, "EnvironmentSpecularScale")
+
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+    end)
+
+    State.PerformanceEnabled = true
+
+    task.spawn(scanPerformance)
+
+    PerformanceConnection =
+        game.DescendantAdded:Connect(function(instance)
+            if not State.PerformanceEnabled then
+                return
+            end
+
+            task.defer(function()
+                if State.PerformanceEnabled then
+                    optimizeInstance(instance)
+                end
+            end)
+        end)
+end
+
+local function disablePerformance()
+    State.PerformanceEnabled = false
+
+    if PerformanceConnection then
+        PerformanceConnection:Disconnect()
+        PerformanceConnection = nil
+    end
+
+    for instance, properties in pairs(PerformanceBackup) do
+        if instance and instance.Parent then
+            for property, value in pairs(properties) do
+                pcall(function()
+                    instance[property] = value
+                end)
+            end
+        end
+    end
+
+    table.clear(PerformanceBackup)
+end
+
+--==================================================
+-- OPEN / CLOSE
+--==================================================
+
+OpenButton.Activated:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+CloseButton.Activated:Connect(function()
+    Main.Visible = false
+end)
+
+--==================================================
+-- CHARACTER RESET
+--==================================================
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+
+    local humanoid = getHumanoid()
+
+    if humanoid then
+        if State.SpeedEnabled then
+            humanoid.WalkSpeed = State.Speed
+        end
+
+        if State.JumpEnabled then
+            humanoid.JumpPower = State.JumpPower
+        end
+    end
+
+    if State.ESPEnabled then
+        refreshESP()
+    end
+end)
+
+--==================================================
+-- MAIN LOOP
+--==================================================
+
+local espTimer = 0
+local performanceTimer = 0
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    ------------------------------------------------
+    -- Movement
+    ------------------------------------------------
+
+    local humanoid = getHumanoid()
+
+    if humanoid then
+        if State.SpeedEnabled then
+            humanoid.WalkSpeed = State.Speed
+        end
+
+        if State.JumpEnabled then
+            humanoid.UseJumpPower = true
+            humanoid.JumpPower = State.JumpPower
+        end
+    end
+
+    ------------------------------------------------
+    -- No Clip
+    ------------------------------------------------
+
+    if State.NoClipEnabled then
+        local character = getCharacter()
+
+        if character then
+            for _, instance in ipairs(character:GetDescendants()) do
+                if instance:IsA("BasePart") then
+                    instance.CanCollide = false
+                end
+            end
+        end
+    end
+
+    ------------------------------------------------
+    -- Aim
+    ------------------------------------------------
+
+    updateAim()
+
+    ------------------------------------------------
+    -- FOV
+    ------------------------------------------------
+
+    local camera = workspace.CurrentCamera
+
+    if camera then
+        local viewport = camera.ViewportSize
+
+        FOVCircle.Position = UDim2.fromOffset(
+            viewport.X / 2,
+            viewport.Y / 2
+        )
+
+        -- Keep the visual indicator inside the viewport.
+        local maxVisual =
+            math.min(viewport.X, viewport.Y) * 0.45
+
+        local visualSize =
+            math.min(State.AimFOV, maxVisual)
+
+        FOVCircle.Size =
+            UDim2.fromOffset(
+                visualSize * 2,
+                visualSize * 2
+            )
+
+        FOVCircle.Visible = State.AimEnabled
+    end
+
+    ------------------------------------------------
+    -- ESP
+    ------------------------------------------------
+
+    espTimer += deltaTime
+
+    if espTimer >= CONFIG.ESPRefresh then
+        espTimer = 0
+        refreshESP()
+    end
+
+    ------------------------------------------------
+    -- Performance maintenance
+    ------------------------------------------------
+
+    if State.PerformanceEnabled then
+        performanceTimer += deltaTime
+
+        if performanceTimer >= CONFIG.PerformanceScanInterval then
+            performanceTimer = 0
+
+            task.spawn(scanPerformance)
+        end
+    else
+        performanceTimer = 0
+    end
+end)
+
+--==================================================
+-- PERFORMANCE TOGGLE MONITOR
+--==================================================
+
+task.spawn(function()
+    local previous = false
+
+    while ScreenGui.Parent do
+        if State.PerformanceEnabled ~= previous then
+            previous = State.PerformanceEnabled
+
+            if State.PerformanceEnabled then
+                enablePerformance()
+            else
+                disablePerformance()
+            end
+        end
+
+        task.wait(0.15)
+    end
+end)
+
+--==================================================
+-- STARTUP
+--==================================================
+
+print("[XiBoDepZaiVIP V3] Loaded successfully.")
+print("[XiBoDepZaiVIP V3] Mobile drag: enabled.")
+print("[XiBoDepZaiVIP V3] Ultra Performance V3: ready.")
