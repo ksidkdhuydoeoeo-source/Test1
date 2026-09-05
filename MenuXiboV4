@@ -1,0 +1,1120 @@
+--[[
+    XiBoDepZaiVIP V3
+    Client Admin / Debug Menu
+    Place: StarterGui
+
+    Features:
+    - Draggable mobile/PC menu
+    - Speed + slider
+    - High Jump + slider
+    - Smart Aim / Aim Assist
+    - Adjustable Aim FOV
+    - Enemy ESP
+    - No Clip
+    - Ultra Performance
+    - Fixed FOV circle at screen center
+    - Proper restore when toggles are disabled
+]]
+
+--// Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Camera = workspace.CurrentCamera
+
+--// =========================================================
+--// STATE
+--// =========================================================
+
+local State = {
+    SpeedEnabled = false,
+    Speed = 32,
+
+    JumpEnabled = false,
+    JumpPower = 75,
+
+    AimEnabled = false,
+    AimFOV = 150,
+    AimSmoothness = 0.18,
+
+    ESPEnabled = false,
+    NoClipEnabled = false,
+
+    PerformanceEnabled = false,
+}
+
+--// =========================================================
+--// CHARACTER HELPERS
+--// =========================================================
+
+local function getCharacter()
+    return LocalPlayer.Character
+end
+
+local function getHumanoid()
+    local character = getCharacter()
+
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local character = getCharacter()
+
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+--// =========================================================
+--// SPEED
+--// =========================================================
+
+local OriginalWalkSpeed = nil
+local previousSpeedEnabled = false
+
+local function enableSpeed()
+    local humanoid = getHumanoid()
+
+    if not humanoid then
+        return
+    end
+
+    if OriginalWalkSpeed == nil then
+        OriginalWalkSpeed = humanoid.WalkSpeed
+    end
+
+    humanoid.WalkSpeed = State.Speed
+end
+
+local function disableSpeed()
+    local humanoid = getHumanoid()
+
+    if humanoid then
+        if OriginalWalkSpeed ~= nil then
+            humanoid.WalkSpeed = OriginalWalkSpeed
+        else
+            humanoid.WalkSpeed = 16
+        end
+    end
+
+    OriginalWalkSpeed = nil
+end
+
+--// =========================================================
+--// HIGH JUMP
+--// =========================================================
+
+local OriginalJumpPower = nil
+local OriginalUseJumpPower = nil
+local previousJumpEnabled = false
+
+local function enableJump()
+    local humanoid = getHumanoid()
+
+    if not humanoid then
+        return
+    end
+
+    if OriginalJumpPower == nil then
+        OriginalJumpPower = humanoid.JumpPower
+        OriginalUseJumpPower = humanoid.UseJumpPower
+    end
+
+    humanoid.UseJumpPower = true
+    humanoid.JumpPower = State.JumpPower
+end
+
+local function disableJump()
+    local humanoid = getHumanoid()
+
+    if humanoid then
+        if OriginalJumpPower ~= nil then
+            humanoid.JumpPower = OriginalJumpPower
+        end
+
+        if OriginalUseJumpPower ~= nil then
+            humanoid.UseJumpPower = OriginalUseJumpPower
+        end
+    end
+
+    OriginalJumpPower = nil
+    OriginalUseJumpPower = nil
+end
+
+--// =========================================================
+--// NO CLIP
+--// =========================================================
+
+local NoClipBackup = {}
+local previousNoClipEnabled = false
+
+local function enableNoClip()
+    local character = getCharacter()
+
+    if not character then
+        return
+    end
+
+    for _, object in ipairs(character:GetDescendants()) do
+        if object:IsA("BasePart") then
+            if NoClipBackup[object] == nil then
+                NoClipBackup[object] = object.CanCollide
+            end
+
+            object.CanCollide = false
+        end
+    end
+end
+
+local function disableNoClip()
+    for object, originalValue in pairs(NoClipBackup) do
+        if object and object.Parent then
+            object.CanCollide = originalValue
+        end
+    end
+
+    table.clear(NoClipBackup)
+end
+
+--// =========================================================
+--// AIM ASSIST
+--// =========================================================
+
+local function isEnemy(player)
+    if player == LocalPlayer then
+        return false
+    end
+
+    if LocalPlayer.Team ~= nil and player.Team ~= nil then
+        return LocalPlayer.Team ~= player.Team
+    end
+
+    return true
+end
+
+local function getTargetPart(character)
+    return character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function hasLineOfSight(targetPart)
+    local character = getCharacter()
+
+    if not character or not targetPart then
+        return false
+    end
+
+    local origin = Camera.CFrame.Position
+    local direction = targetPart.Position - origin
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { character }
+    params.IgnoreWater = true
+
+    local result = workspace:Raycast(
+        origin,
+        direction,
+        params
+    )
+
+    if not result then
+        return true
+    end
+
+    return result.Instance:IsDescendantOf(targetPart.Parent)
+end
+
+local function getClosestVisibleEnemy()
+    local viewportSize = Camera.ViewportSize
+    local center = Vector2.new(
+        viewportSize.X / 2,
+        viewportSize.Y / 2
+    )
+
+    local bestTarget = nil
+    local bestScore = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isEnemy(player) then
+            local character = player.Character
+
+            if character then
+                local humanoid =
+                    character:FindFirstChildOfClass("Humanoid")
+
+                local targetPart =
+                    getTargetPart(character)
+
+                if humanoid
+                    and humanoid.Health > 0
+                    and targetPart then
+
+                    local screenPosition, onScreen =
+                        Camera:WorldToViewportPoint(
+                            targetPart.Position
+                        )
+
+                    if onScreen and screenPosition.Z > 0 then
+                        local screenPoint = Vector2.new(
+                            screenPosition.X,
+                            screenPosition.Y
+                        )
+
+                        local screenDistance =
+                            (screenPoint - center).Magnitude
+
+                        if screenDistance <= State.AimFOV
+                            and hasLineOfSight(targetPart) then
+
+                            local worldDistance =
+                                (
+                                    targetPart.Position
+                                    - Camera.CFrame.Position
+                                ).Magnitude
+
+                            local score =
+                                screenDistance
+                                + worldDistance * 0.01
+
+                            if score < bestScore then
+                                bestScore = score
+                                bestTarget = targetPart
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestTarget
+end
+
+local function updateAim()
+    if not State.AimEnabled then
+        return
+    end
+
+    local target = getClosestVisibleEnemy()
+
+    if not target then
+        return
+    end
+
+    local cameraPosition = Camera.CFrame.Position
+
+    local targetCFrame = CFrame.lookAt(
+        cameraPosition,
+        target.Position
+    )
+
+    Camera.CFrame = Camera.CFrame:Lerp(
+        targetCFrame,
+        State.AimSmoothness
+    )
+end
+
+--// =========================================================
+--// ESP
+--// =========================================================
+
+local ESPObjects = {}
+
+local function removeESP(player)
+    local data = ESPObjects[player]
+
+    if not data then
+        return
+    end
+
+    if data.Highlight then
+        data.Highlight:Destroy()
+    end
+
+    if data.Billboard then
+        data.Billboard:Destroy()
+    end
+
+    ESPObjects[player] = nil
+end
+
+local function createESP(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    if not isEnemy(player) then
+        removeESP(player)
+        return
+    end
+
+    local character = player.Character
+
+    if not character then
+        return
+    end
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    local head =
+        character:FindFirstChild("Head")
+
+    if not humanoid or humanoid.Health <= 0 or not head then
+        return
+    end
+
+    local data = ESPObjects[player]
+
+    if data
+        and data.Character == character
+        and data.Highlight
+        and data.Billboard then
+        return
+    end
+
+    removeESP(player)
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "XiBoESP"
+    highlight.Adornee = character
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = 0.65
+    highlight.OutlineTransparency = 0
+    highlight.Parent = character
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "XiBoESPName"
+    billboard.Adornee = head
+    billboard.Size = UDim2.fromOffset(160, 32)
+    billboard.StudsOffset = Vector3.new(0, 2.8, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.Text = player.DisplayName
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0.25
+    label.Parent = billboard
+
+    ESPObjects[player] = {
+        Character = character,
+        Highlight = highlight,
+        Billboard = billboard,
+    }
+end
+
+local function refreshESP()
+    if not State.ESPEnabled then
+        for player in pairs(ESPObjects) do
+            removeESP(player)
+        end
+
+        return
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        createESP(player)
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+
+--// =========================================================
+--// PERFORMANCE MODE
+--// =========================================================
+
+local PerformanceBackup = {}
+local PerformanceConnection = nil
+
+local function remember(object, property)
+    PerformanceBackup[object] =
+        PerformanceBackup[object] or {}
+
+    if PerformanceBackup[object][property] == nil then
+        PerformanceBackup[object][property] =
+            object[property]
+    end
+end
+
+local function optimizeObject(object)
+    if object:IsA("ParticleEmitter")
+        or object:IsA("Trail")
+        or object:IsA("Beam")
+        or object:IsA("Smoke")
+        or object:IsA("Fire")
+        or object:IsA("Sparkles") then
+
+        remember(object, "Enabled")
+        object.Enabled = false
+
+    elseif object:IsA("BloomEffect")
+        or object:IsA("BlurEffect")
+        or object:IsA("DepthOfFieldEffect")
+        or object:IsA("SunRaysEffect")
+        or object:IsA("ColorCorrectionEffect") then
+
+        remember(object, "Enabled")
+        object.Enabled = false
+    end
+end
+
+local function enablePerformance()
+    remember(Lighting, "GlobalShadows")
+    remember(Lighting, "EnvironmentDiffuseScale")
+    remember(Lighting, "EnvironmentSpecularScale")
+    remember(Lighting, "FogEnd")
+
+    Lighting.GlobalShadows = false
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.FogEnd = 100000
+
+    for _, object in ipairs(game:GetDescendants()) do
+        optimizeObject(object)
+    end
+
+    if PerformanceConnection then
+        PerformanceConnection:Disconnect()
+    end
+
+    PerformanceConnection =
+        game.DescendantAdded:Connect(function(object)
+            if State.PerformanceEnabled then
+                optimizeObject(object)
+            end
+        end)
+end
+
+local function disablePerformance()
+    if PerformanceConnection then
+        PerformanceConnection:Disconnect()
+        PerformanceConnection = nil
+    end
+
+    for object, properties in pairs(PerformanceBackup) do
+        if object and object.Parent then
+            for property, value in pairs(properties) do
+                pcall(function()
+                    object[property] = value
+                end)
+            end
+        end
+    end
+
+    table.clear(PerformanceBackup)
+end
+
+--// =========================================================
+--// GUI HELPERS
+--// =========================================================
+
+local function create(className, properties, parent)
+    local object = Instance.new(className)
+
+    for property, value in pairs(properties) do
+        object[property] = value
+    end
+
+    object.Parent = parent
+
+    return object
+end
+
+local ScreenGui = create("ScreenGui", {
+    Name = "XiBoDepZaiVIP",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, PlayerGui)
+
+--// Open button
+local OpenButton = create("TextButton", {
+    Name = "OpenButton",
+    Size = UDim2.fromOffset(62, 42),
+    Position = UDim2.new(0, 15, 0.5, -21),
+    BackgroundTransparency = 0.08,
+    Text = "VIP",
+    TextSize = 17,
+    Font = Enum.Font.GothamBold,
+    AutoButtonColor = true,
+}, ScreenGui)
+
+create("UICorner", {
+    CornerRadius = UDim.new(0, 12),
+}, OpenButton)
+
+--// Main menu
+local Main = create("Frame", {
+    Name = "Main",
+    Size = UDim2.fromOffset(340, 510),
+    Position = UDim2.new(0.5, -170, 0.5, -255),
+    BackgroundTransparency = 0.05,
+    Visible = true,
+    Active = true,
+}, ScreenGui)
+
+create("UICorner", {
+    CornerRadius = UDim.new(0, 16),
+}, Main)
+
+create("UIStroke", {
+    Thickness = 1.5,
+    Transparency = 0.25,
+}, Main)
+
+--// =========================================================
+--// DRAGGABLE MENU
+--// =========================================================
+
+local TitleBar = create("Frame", {
+    Name = "TitleBar",
+    Size = UDim2.new(1, 0, 0, 54),
+    BackgroundTransparency = 1,
+    Active = true,
+}, Main)
+
+local Title = create("TextLabel", {
+    Size = UDim2.new(1, -55, 1, 0),
+    Position = UDim2.fromOffset(16, 0),
+    BackgroundTransparency = 1,
+    Text = "XiBoDepZai • VIP",
+    TextSize = 19,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, TitleBar)
+
+local CloseButton = create("TextButton", {
+    Size = UDim2.fromOffset(40, 40),
+    Position = UDim2.new(1, -46, 0, 7),
+    BackgroundTransparency = 1,
+    Text = "×",
+    TextSize = 30,
+    Font = Enum.Font.GothamBold,
+}, TitleBar)
+
+-- Proper mobile + mouse dragging
+local dragging = false
+local dragStart
+local startPosition
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Main.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then
+        return
+    end
+
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
+
+    local delta = input.Position - dragStart
+
+    Main.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
+end)
+
+--// =========================================================
+--// SCROLL AREA
+--// =========================================================
+
+local Scroll = create("ScrollingFrame", {
+    Name = "Scroll",
+    Size = UDim2.new(1, -20, 1, -66),
+    Position = UDim2.fromOffset(10, 58),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 4,
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, Main)
+
+local List = create("UIListLayout", {
+    Padding = UDim.new(0, 8),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, Scroll)
+
+create("UIPadding", {
+    PaddingTop = UDim.new(0, 4),
+    PaddingBottom = UDim.new(0, 10),
+    PaddingLeft = UDim.new(0, 2),
+    PaddingRight = UDim.new(0, 2),
+}, Scroll)
+
+--// =========================================================
+--// UI COMPONENTS
+--// =========================================================
+
+local function section(title)
+    local frame = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 30),
+        BackgroundTransparency = 1,
+    }, Scroll)
+
+    create("TextLabel", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "  " .. title,
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, frame)
+end
+
+local function toggle(title, initialValue, callback)
+    local button = create("TextButton", {
+        Size = UDim2.new(1, -4, 0, 44),
+        BackgroundTransparency = 0.08,
+        Text = "",
+        AutoButtonColor = true,
+    }, Scroll)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(0, 10),
+    }, button)
+
+    local label = create("TextLabel", {
+        Size = UDim2.new(1, -70, 1, 0),
+        Position = UDim2.fromOffset(14, 0),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextSize = 14,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, button)
+
+    local stateLabel = create("TextLabel", {
+        Size = UDim2.fromOffset(55, 30),
+        Position = UDim2.new(1, -62, 0.5, -15),
+        BackgroundTransparency = 1,
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+    }, button)
+
+    local value = initialValue
+
+    local function refresh()
+        stateLabel.Text = value and "ON" or "OFF"
+    end
+
+    button.MouseButton1Click:Connect(function()
+        value = not value
+        refresh()
+        callback(value)
+    end)
+
+    refresh()
+
+    return button
+end
+
+local function slider(title, minimum, maximum, initial, callback)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 62),
+        BackgroundTransparency = 0.08,
+    }, Scroll)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(0, 10),
+    }, holder)
+
+    local label = create("TextLabel", {
+        Size = UDim2.new(1, -25, 0, 24),
+        Position = UDim2.fromOffset(12, 5),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextSize = 13,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, holder)
+
+    local valueLabel = create("TextLabel", {
+        Size = UDim2.fromOffset(55, 24),
+        Position = UDim2.new(1, -65, 0, 5),
+        BackgroundTransparency = 1,
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    }, holder)
+
+    local bar = create("Frame", {
+        Size = UDim2.new(1, -24, 0, 8),
+        Position = UDim2.fromOffset(12, 39),
+        BackgroundTransparency = 0.15,
+        Active = true,
+    }, holder)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(1, 0),
+    }, bar)
+
+    local fill = create("Frame", {
+        Size = UDim2.fromScale(0, 1),
+        BackgroundTransparency = 0,
+    }, bar)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(1, 0),
+    }, fill)
+
+    local current = initial
+    local sliding = false
+
+    local function setValueFromX(x)
+        local percent =
+            math.clamp(
+                (x - bar.AbsolutePosition.X)
+                / bar.AbsoluteSize.X,
+                0,
+                1
+            )
+
+        current =
+            math.floor(
+                minimum
+                + (maximum - minimum) * percent
+                + 0.5
+            )
+
+        fill.Size = UDim2.fromScale(percent, 1)
+        valueLabel.Text = tostring(current)
+
+        callback(current)
+    end
+
+    local function begin(input)
+        sliding = true
+        setValueFromX(input.Position.X)
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            begin(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not sliding then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            setValueFromX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+
+    local percent =
+        math.clamp(
+            (initial - minimum)
+            / (maximum - minimum),
+            0,
+            1
+        )
+
+    fill.Size = UDim2.fromScale(percent, 1)
+    valueLabel.Text = tostring(initial)
+
+    return holder
+end
+
+--// =========================================================
+--// MENU CONTENT
+--// =========================================================
+
+section("MOVEMENT")
+
+toggle("Speed", false, function(enabled)
+    State.SpeedEnabled = enabled
+
+    if enabled then
+        enableSpeed()
+    else
+        disableSpeed()
+    end
+end)
+
+slider("Speed", 16, 100, State.Speed, function(value)
+    State.Speed = value
+
+    if State.SpeedEnabled then
+        local humanoid = getHumanoid()
+
+        if humanoid then
+            humanoid.WalkSpeed = value
+        end
+    end
+end)
+
+toggle("High Jump", false, function(enabled)
+    State.JumpEnabled = enabled
+
+    if enabled then
+        enableJump()
+    else
+        disableJump()
+    end
+end)
+
+slider("Jump Power", 50, 150, State.JumpPower, function(value)
+    State.JumpPower = value
+
+    if State.JumpEnabled then
+        local humanoid = getHumanoid()
+
+        if humanoid then
+            humanoid.UseJumpPower = true
+            humanoid.JumpPower = value
+        end
+    end
+end)
+
+section("AIM ASSIST")
+
+toggle("Smart Aim", false, function(enabled)
+    State.AimEnabled = enabled
+end)
+
+slider("Aim FOV", 50, 500, State.AimFOV, function(value)
+    State.AimFOV = value
+end)
+
+section("PLAYER ESP")
+
+toggle("Enemy ESP", false, function(enabled)
+    State.ESPEnabled = enabled
+
+    if not enabled then
+        for player in pairs(ESPObjects) do
+            removeESP(player)
+        end
+    end
+end)
+
+section("DEBUG")
+
+toggle("No Clip", false, function(enabled)
+    State.NoClipEnabled = enabled
+
+    if enabled then
+        enableNoClip()
+    else
+        disableNoClip()
+    end
+end)
+
+section("PERFORMANCE")
+
+toggle("Ultra Performance", false, function(enabled)
+    State.PerformanceEnabled = enabled
+
+    if enabled then
+        enablePerformance()
+    else
+        disablePerformance()
+    end
+end)
+
+--// =========================================================
+--// FIXED FOV CIRCLE
+--// =========================================================
+
+local FOVCircle = create("Frame", {
+    Name = "FOVCircle",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(State.AimFOV * 2, State.AimFOV * 2),
+    BackgroundTransparency = 1,
+    Visible = false,
+    Active = false,
+    ZIndex = 0,
+}, ScreenGui)
+
+create("UICorner", {
+    CornerRadius = UDim.new(1, 0),
+}, FOVCircle)
+
+create("UIStroke", {
+    Thickness = 1.5,
+    Transparency = 0.15,
+}, FOVCircle)
+
+--// =========================================================
+--// OPEN / CLOSE
+--// =========================================================
+
+local function setMenuVisible(value)
+    Main.Visible = value
+end
+
+OpenButton.MouseButton1Click:Connect(function()
+    setMenuVisible(not Main.Visible)
+end)
+
+CloseButton.MouseButton1Click:Connect(function()
+    setMenuVisible(false)
+end)
+
+--// =========================================================
+--// CHARACTER RESPAWN
+--// =========================================================
+
+LocalPlayer.CharacterAdded:Connect(function()
+    OriginalWalkSpeed = nil
+    OriginalJumpPower = nil
+    OriginalUseJumpPower = nil
+
+    table.clear(NoClipBackup)
+
+    task.wait(0.5)
+
+    if State.SpeedEnabled then
+        enableSpeed()
+    end
+
+    if State.JumpEnabled then
+        enableJump()
+    end
+
+    if State.NoClipEnabled then
+        enableNoClip()
+    end
+end)
+
+--// =========================================================
+--// MAIN LOOP
+--// =========================================================
+
+local espTimer = 0
+
+RunService.RenderStepped:Connect(function(deltaTime)
+
+    -- Speed
+    if State.SpeedEnabled then
+        if not previousSpeedEnabled then
+            enableSpeed()
+        end
+
+        local humanoid = getHumanoid()
+
+        if humanoid then
+            humanoid.WalkSpeed = State.Speed
+        end
+    elseif previousSpeedEnabled then
+        disableSpeed()
+    end
+
+    previousSpeedEnabled = State.SpeedEnabled
+
+    -- High Jump
+    if State.JumpEnabled then
+        if not previousJumpEnabled then
+            enableJump()
+        end
+
+        local humanoid = getHumanoid()
+
+        if humanoid then
+            humanoid.UseJumpPower = true
+            humanoid.JumpPower = State.JumpPower
+        end
+    elseif previousJumpEnabled then
+        disableJump()
+    end
+
+    previousJumpEnabled = State.JumpEnabled
+
+    -- No Clip
+    if State.NoClipEnabled then
+        enableNoClip()
+    elseif previousNoClipEnabled then
+        disableNoClip()
+    end
+
+    previousNoClipEnabled = State.NoClipEnabled
+
+    -- Aim
+    updateAim()
+
+    -- FOV circle
+    FOVCircle.Visible = State.AimEnabled
+
+    if State.AimEnabled then
+        FOVCircle.Size =
+            UDim2.fromOffset(
+                State.AimFOV * 2,
+                State.AimFOV * 2
+            )
+    end
+
+    -- ESP throttled
+    espTimer += deltaTime
+
+    if espTimer >= 0.15 then
+        espTimer = 0
+        refreshESP()
+    end
+end)
+
+--// =========================================================
+--// CLEANUP
+--// =========================================================
+
+ScreenGui.Destroying:Connect(function()
+    disableSpeed()
+    disableJump()
+    disableNoClip()
+    disablePerformance()
+
+    for player in pairs(ESPObjects) do
+        removeESP(player)
+    end
+end)
+
+print("[XiBoDepZaiVIP] V3 loaded successfully.")
