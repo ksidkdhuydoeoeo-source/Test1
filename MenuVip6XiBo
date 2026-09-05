@@ -1,0 +1,2331 @@
+--========================================================
+-- XiBoDzV5 V6
+-- Premium Black Admin / Debug UI
+-- Dành cho experience Roblox của bạn
+--========================================================
+
+-- SERVICES
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+--========================================================
+-- CONFIG
+--========================================================
+
+local CONFIG = {
+    MenuName = "XiBoDzV5",
+
+    SpeedMin = 16,
+    SpeedMax = 100,
+    SpeedDefault = 32,
+
+    JumpMin = 50,
+    JumpMax = 150,
+    JumpDefault = 75,
+
+    FlyMin = 10,
+    FlyMax = 150,
+    FlyDefault = 50,
+
+    FOVMin = 50,
+    FOVMax = 500,
+    FOVDefault = 150,
+
+    AimSmoothness = 0.18,
+    ESPRefresh = 0.35,
+
+    DesktopWidth = 650,
+    DesktopHeight = 430,
+
+    MobileWidth = 360,
+    MobileHeight = 500,
+}
+
+--========================================================
+-- STATE
+--========================================================
+
+local State = {
+    SpeedEnabled = false,
+    Speed = CONFIG.SpeedDefault,
+
+    JumpEnabled = false,
+    JumpPower = CONFIG.JumpDefault,
+
+    FlyEnabled = false,
+    FlySpeed = CONFIG.FlyDefault,
+
+    AimEnabled = false,
+    AimFOV = CONFIG.FOVDefault,
+
+    ESPNameEnabled = false,
+    ESPBonesEnabled = false,
+    ESPDirectionsEnabled = false,
+
+    NoClipEnabled = false,
+    PerformanceEnabled = false,
+
+    FlyUp = false,
+    FlyDown = false,
+}
+
+--========================================================
+-- RUNTIME
+--========================================================
+
+local Character
+local Humanoid
+local RootPart
+
+local OriginalWalkSpeed
+local OriginalJumpPower
+local OriginalUseJumpPower
+
+local NoClipBackup = {}
+local PerformanceBackup = {}
+
+local FlyVelocity
+local FlyGyro
+
+local Connections = {}
+local Destroyed = false
+
+--========================================================
+-- CHARACTER
+--========================================================
+
+local function refreshCharacter()
+    Character = LocalPlayer.Character
+
+    if not Character then
+        Humanoid = nil
+        RootPart = nil
+        return
+    end
+
+    Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    RootPart = Character:FindFirstChild("HumanoidRootPart")
+
+    if Humanoid then
+        OriginalWalkSpeed = Humanoid.WalkSpeed
+        OriginalJumpPower = Humanoid.JumpPower
+        OriginalUseJumpPower = Humanoid.UseJumpPower
+    end
+end
+
+refreshCharacter()
+
+--========================================================
+-- GUI CLEANUP
+--========================================================
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local OldGui = PlayerGui:FindFirstChild(CONFIG.MenuName)
+
+if OldGui then
+    OldGui:Destroy()
+end
+
+--========================================================
+-- COLORS
+--========================================================
+
+local COLORS = {
+    Background = Color3.fromRGB(8, 8, 10),
+    Sidebar = Color3.fromRGB(12, 12, 15),
+    Panel = Color3.fromRGB(16, 16, 20),
+    Panel2 = Color3.fromRGB(21, 21, 26),
+
+    Border = Color3.fromRGB(45, 45, 52),
+
+    Text = Color3.fromRGB(245, 245, 248),
+    SubText = Color3.fromRGB(150, 150, 160),
+
+    Accent = Color3.fromRGB(135, 90, 255),
+    AccentDark = Color3.fromRGB(90, 55, 180),
+
+    ToggleOff = Color3.fromRGB(40, 40, 47),
+    ToggleOn = Color3.fromRGB(135, 90, 255),
+
+    Slider = Color3.fromRGB(135, 90, 255),
+}
+
+--========================================================
+-- UTILITY
+--========================================================
+
+local function create(className, properties, parent)
+    local object = Instance.new(className)
+
+    for property, value in pairs(properties or {}) do
+        object[property] = value
+    end
+
+    object.Parent = parent
+
+    return object
+end
+
+local function corner(parent, radius)
+    return create("UICorner", {
+        CornerRadius = UDim.new(0, radius or 8),
+    }, parent)
+end
+
+local function stroke(parent, color, thickness, transparency)
+    return create("UIStroke", {
+        Color = color or COLORS.Border,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0,
+    }, parent)
+end
+
+local function tween(object, info, properties)
+    return TweenService:Create(
+        object,
+        info,
+        properties
+    )
+end
+
+local function clamp(value, minimum, maximum)
+    return math.clamp(
+        tonumber(value) or minimum,
+        minimum,
+        maximum
+    )
+end
+
+--========================================================
+-- SCREEN GUI
+--========================================================
+
+local ScreenGui = create("ScreenGui", {
+    Name = CONFIG.MenuName,
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, PlayerGui)
+
+--========================================================
+-- MAIN
+--========================================================
+
+local Main = create("Frame", {
+    Name = "Main",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(
+        CONFIG.DesktopWidth,
+        CONFIG.DesktopHeight
+    ),
+    BackgroundColor3 = COLORS.Background,
+    BorderSizePixel = 0,
+}, ScreenGui)
+
+corner(Main, 14)
+stroke(Main, COLORS.Border, 1)
+
+--========================================================
+-- RESPONSIVE SCALE
+--========================================================
+
+local UIScale = create("UIScale", {
+    Scale = 1,
+}, Main)
+
+local function updateScale()
+    local viewport = Camera.ViewportSize
+
+    local scaleX = viewport.X / CONFIG.DesktopWidth
+    local scaleY = viewport.Y / CONFIG.DesktopHeight
+
+    local targetScale = math.min(
+        1,
+        scaleX * 0.90,
+        scaleY * 0.90
+    )
+
+    if viewport.X <= 600 then
+        targetScale = math.min(
+            1,
+            viewport.X / CONFIG.MobileWidth * 0.92,
+            viewport.Y / CONFIG.MobileHeight * 0.88
+        )
+    end
+
+    UIScale.Scale = math.max(
+        0.55,
+        targetScale
+    )
+end
+
+updateScale()
+
+table.insert(
+    Connections,
+    Camera:GetPropertyChangedSignal("ViewportSize"):Connect(
+        updateScale
+    )
+)
+
+--========================================================
+-- TOP BAR
+--========================================================
+
+local TopBar = create("Frame", {
+    Name = "TopBar",
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 58),
+    BackgroundColor3 = COLORS.Panel,
+    BorderSizePixel = 0,
+}, Main)
+
+corner(TopBar, 14)
+
+local TopBarCover = create("Frame", {
+    Position = UDim2.new(0, 0, 1, -14),
+    Size = UDim2.new(1, 0, 0, 14),
+    BackgroundColor3 = COLORS.Panel,
+    BorderSizePixel = 0,
+}, TopBar)
+
+--========================================================
+-- DRAG AREA
+--========================================================
+
+local DragArea = create("Frame", {
+    Name = "DragArea",
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, -62, 1, 0),
+    BackgroundTransparency = 1,
+    Active = true,
+}, TopBar)
+
+local dragging = false
+local dragStart
+local startPosition
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+
+    Main.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
+end
+
+DragArea.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Main.Position
+    end
+end)
+
+DragArea.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging then
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            updateDrag(input)
+        end
+    end
+end)
+
+--========================================================
+-- TITLE
+--========================================================
+
+create("TextLabel", {
+    Position = UDim2.fromOffset(20, 9),
+    Size = UDim2.fromOffset(300, 24),
+    BackgroundTransparency = 1,
+    Text = CONFIG.MenuName,
+    Font = Enum.Font.GothamBold,
+    TextSize = 20,
+    TextColor3 = COLORS.Text,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, TopBar)
+
+create("TextLabel", {
+    Position = UDim2.fromOffset(21, 33),
+    Size = UDim2.fromOffset(300, 17),
+    BackgroundTransparency = 1,
+    Text = "Premium Control Panel",
+    Font = Enum.Font.Gotham,
+    TextSize = 10,
+    TextColor3 = COLORS.SubText,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, TopBar)
+
+--========================================================
+-- CLOSE
+--========================================================
+
+local CloseButton = create("TextButton", {
+    Name = "Close",
+    AnchorPoint = Vector2.new(1, 0.5),
+    Position = UDim2.new(1, -12, 0.5, 0),
+    Size = UDim2.fromOffset(36, 36),
+    BackgroundColor3 = COLORS.Panel2,
+    Text = "×",
+    Font = Enum.Font.GothamBold,
+    TextSize = 22,
+    TextColor3 = COLORS.SubText,
+    AutoButtonColor = false,
+}, TopBar)
+
+corner(CloseButton, 9)
+stroke(CloseButton, COLORS.Border, 1)
+
+CloseButton.MouseEnter:Connect(function()
+    tween(
+        CloseButton,
+        TweenInfo.new(0.15),
+        {
+            BackgroundColor3 = Color3.fromRGB(80, 35, 40),
+            TextColor3 = COLORS.Text,
+        }
+    ):Play()
+end)
+
+CloseButton.MouseLeave:Connect(function()
+    tween(
+        CloseButton,
+        TweenInfo.new(0.15),
+        {
+            BackgroundColor3 = COLORS.Panel2,
+            TextColor3 = COLORS.SubText,
+        }
+    ):Play()
+end)
+
+--========================================================
+-- CONTENT
+--========================================================
+
+local Content = create("Frame", {
+    Position = UDim2.fromOffset(0, 58),
+    Size = UDim2.new(1, 0, 1, -58),
+    BackgroundTransparency = 1,
+}, Main)
+
+--========================================================
+-- SIDEBAR
+--========================================================
+
+local Sidebar = create("Frame", {
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.fromOffset(145, 1),
+    BackgroundColor3 = COLORS.Sidebar,
+    BorderSizePixel = 0,
+}, Content)
+
+local SidebarLayout = create("UIListLayout", {
+    Padding = UDim.new(0, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, Sidebar)
+
+create("UIPadding", {
+    PaddingTop = UDim.new(0, 15),
+    PaddingLeft = UDim.new(0, 10),
+    PaddingRight = UDim.new(0, 10),
+}, Sidebar)
+
+--========================================================
+-- PAGE CONTAINER
+--========================================================
+
+local PageContainer = create("Frame", {
+    Position = UDim2.fromOffset(145, 0),
+    Size = UDim2.new(1, -145, 1, 0),
+    BackgroundTransparency = 1,
+}, Content)
+
+--========================================================
+-- TABS
+--========================================================
+
+local Tabs = {}
+local Pages = {}
+
+local currentTab
+
+local function createPage(name)
+    local page = create("ScrollingFrame", {
+        Name = name .. "Page",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+
+        BorderSizePixel = 0,
+
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = COLORS.Accent,
+
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+
+        Visible = false,
+    }, PageContainer)
+
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 15),
+        PaddingBottom = UDim.new(0, 15),
+        PaddingLeft = UDim.new(0, 18),
+        PaddingRight = UDim.new(0, 18),
+    }, page)
+
+    local layout = create("UIListLayout", {
+        Padding = UDim.new(0, 10),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, page)
+
+    Pages[name] = page
+
+    return page
+end
+
+local function selectTab(name)
+    for tabName, tab in pairs(Tabs) do
+        local selected = tabName == name
+
+        tween(
+            tab,
+            TweenInfo.new(0.15),
+            {
+                BackgroundColor3 = selected
+                    and COLORS.AccentDark
+                    or COLORS.Sidebar,
+            }
+        ):Play()
+
+        local icon = tab:FindFirstChild("Icon")
+
+        if icon then
+            icon.TextColor3 = selected
+                and COLORS.Text
+                or COLORS.SubText
+        end
+
+        local label = tab:FindFirstChild("Label")
+
+        if label then
+            label.TextColor3 = selected
+                and COLORS.Text
+                or COLORS.SubText
+        end
+    end
+
+    for pageName, page in pairs(Pages) do
+        page.Visible = pageName == name
+    end
+
+    currentTab = name
+end
+
+local function createTab(name, iconText, order)
+    local button = create("TextButton", {
+        Name = name .. "Tab",
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = COLORS.Sidebar,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        LayoutOrder = order,
+    }, Sidebar)
+
+    corner(button, 9)
+
+    create("TextLabel", {
+        Name = "Icon",
+        Position = UDim2.fromOffset(10, 0),
+        Size = UDim2.fromOffset(25, 40),
+        BackgroundTransparency = 1,
+        Text = iconText,
+        Font = Enum.Font.GothamBold,
+        TextSize = 15,
+        TextColor3 = COLORS.SubText,
+    }, button)
+
+    create("TextLabel", {
+        Name = "Label",
+        Position = UDim2.fromOffset(38, 0),
+        Size = UDim2.new(1, -45, 1, 0),
+        BackgroundTransparency = 1,
+        Text = name,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = COLORS.SubText,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, button)
+
+    Tabs[name] = button
+
+    button.MouseEnter:Connect(function()
+        if currentTab ~= name then
+            tween(
+                button,
+                TweenInfo.new(0.12),
+                {
+                    BackgroundColor3 = COLORS.Panel2,
+                }
+            ):Play()
+        end
+    end)
+
+    button.MouseLeave:Connect(function()
+        if currentTab ~= name then
+            tween(
+                button,
+                TweenInfo.new(0.12),
+                {
+                    BackgroundColor3 = COLORS.Sidebar,
+                }
+            ):Play()
+        end
+    end)
+
+    button.Activated:Connect(function()
+        selectTab(name)
+    end)
+
+    return button
+end
+
+--========================================================
+-- CREATE PAGES
+--========================================================
+
+local MovementPage = createPage("Movement")
+local AimPage = createPage("Aim")
+local ESPPage = createPage("ESP")
+local DebugPage = createPage("Debug")
+local PerformancePage = createPage("Performance")
+
+createTab("Movement", "◆", 1)
+createTab("Aim", "◎", 2)
+createTab("ESP", "◇", 3)
+createTab("Debug", "⚙", 4)
+createTab("Performance", "⚡", 5)
+
+selectTab("Movement")
+
+--========================================================
+-- SECTION TITLE
+--========================================================
+
+local function createSectionTitle(page, title, subtitle)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 45),
+        BackgroundTransparency = 1,
+    }, page)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.new(1, 0, 0, 24),
+        BackgroundTransparency = 1,
+        Text = title,
+        Font = Enum.Font.GothamBold,
+        TextSize = 17,
+        TextColor3 = COLORS.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, holder)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(0, 23),
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Text = subtitle,
+        Font = Enum.Font.Gotham,
+        TextSize = 10,
+        TextColor3 = COLORS.SubText,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, holder)
+
+    return holder
+end
+
+--========================================================
+-- TOGGLE
+--========================================================
+
+local function createToggle(page, title, description, initial, callback)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 62),
+        BackgroundColor3 = COLORS.Panel,
+        BorderSizePixel = 0,
+    }, page)
+
+    corner(holder, 10)
+    stroke(holder, COLORS.Border, 1)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 10),
+        Size = UDim2.new(1, -75, 0, 20),
+        BackgroundTransparency = 1,
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = COLORS.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, holder)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 32),
+        Size = UDim2.new(1, -75, 0, 18),
+        BackgroundTransparency = 1,
+        Text = description,
+        Font = Enum.Font.Gotham,
+        TextSize = 9,
+        TextColor3 = COLORS.SubText,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, holder)
+
+    local toggle = create("TextButton", {
+        Name = "Toggle",
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -14, 0.5, 0),
+        Size = UDim2.fromOffset(42, 23),
+        BackgroundColor3 = initial
+            and COLORS.ToggleOn
+            or COLORS.ToggleOff,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+    }, holder)
+
+    corner(toggle, 12)
+
+    local knob = create("Frame", {
+        Name = "Knob",
+        AnchorPoint = Vector2.new(0, 0.5),
+        Position = initial
+            and UDim2.new(1, -21, 0.5, 0)
+            or UDim2.new(0, 4, 0.5, 0),
+        Size = UDim2.fromOffset(15, 15),
+        BackgroundColor3 = COLORS.Text,
+        BorderSizePixel = 0,
+    }, toggle)
+
+    corner(knob, 10)
+
+    local enabled = initial
+
+    local function update(value)
+        enabled = value
+
+        tween(
+            toggle,
+            TweenInfo.new(0.15),
+            {
+                BackgroundColor3 = enabled
+                    and COLORS.ToggleOn
+                    or COLORS.ToggleOff,
+            }
+        ):Play()
+
+        tween(
+            knob,
+            TweenInfo.new(0.15, Enum.EasingStyle.Quad),
+            {
+                Position = enabled
+                    and UDim2.new(1, -21, 0.5, 0)
+                    or UDim2.new(0, 4, 0.5, 0),
+            }
+        ):Play()
+
+        if callback then
+            callback(enabled)
+        end
+    end
+
+    toggle.Activated:Connect(function()
+        update(not enabled)
+    end)
+
+    return {
+        Set = update,
+        Get = function()
+            return enabled
+        end,
+    }
+end
+
+--========================================================
+-- SLIDER
+--========================================================
+
+local function createSlider(
+    page,
+    title,
+    minimum,
+    maximum,
+    initial,
+    callback
+)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 68),
+        BackgroundColor3 = COLORS.Panel,
+        BorderSizePixel = 0,
+    }, page)
+
+    corner(holder, 10)
+    stroke(holder, COLORS.Border, 1)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 9),
+        Size = UDim2.new(1, -75, 0, 20),
+        BackgroundTransparency = 1,
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = COLORS.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, holder)
+
+    local valueLabel = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -14, 0, 9),
+        Size = UDim2.fromOffset(55, 20),
+        BackgroundTransparency = 1,
+        Text = tostring(initial),
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextColor3 = COLORS.Accent,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    }, holder)
+
+    local bar = create("Frame", {
+        Position = UDim2.fromOffset(14, 43),
+        Size = UDim2.new(1, -28, 0, 6),
+        BackgroundColor3 = COLORS.ToggleOff,
+        BorderSizePixel = 0,
+        Active = true,
+    }, holder)
+
+    corner(bar, 5)
+
+    local fill = create("Frame", {
+        Size = UDim2.fromScale(
+            (initial - minimum) / (maximum - minimum),
+            1
+        ),
+        BackgroundColor3 = COLORS.Slider,
+        BorderSizePixel = 0,
+    }, bar)
+
+    corner(fill, 5)
+
+    local knob = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(
+            (initial - minimum) / (maximum - minimum),
+            0,
+            0.5,
+            0
+        ),
+        Size = UDim2.fromOffset(13, 13),
+        BackgroundColor3 = COLORS.Text,
+        BorderSizePixel = 0,
+    }, bar)
+
+    corner(knob, 10)
+
+    local value = initial
+    local draggingSlider = false
+
+    local function setValue(newValue)
+        value = clamp(
+            math.floor(newValue + 0.5),
+            minimum,
+            maximum
+        )
+
+        local alpha =
+            (value - minimum)
+            / (maximum - minimum)
+
+        fill.Size = UDim2.fromScale(alpha, 1)
+
+        knob.Position = UDim2.new(
+            alpha,
+            0,
+            0.5,
+            0
+        )
+
+        valueLabel.Text = tostring(value)
+
+        if callback then
+            callback(value)
+        end
+    end
+
+    local function setFromInput(input)
+        local x = input.Position.X
+        local left = bar.AbsolutePosition.X
+        local width = bar.AbsoluteSize.X
+
+        local alpha = math.clamp(
+            (x - left) / width,
+            0,
+            1
+        )
+
+        setValue(
+            minimum + (maximum - minimum) * alpha
+        )
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            draggingSlider = true
+            setFromInput(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if draggingSlider then
+            if input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch then
+
+                setFromInput(input)
+            end
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            draggingSlider = false
+        end
+    end)
+
+    return {
+        Set = setValue,
+        Get = function()
+            return value
+        end,
+    }
+end
+
+--========================================================
+-- MOVEMENT
+--========================================================
+
+createSectionTitle(
+    MovementPage,
+    "Movement",
+    "Movement controls"
+)
+
+-- SPEED
+
+local function setSpeedEnabled(enabled)
+    State.SpeedEnabled = enabled
+
+    if not Humanoid then
+        return
+    end
+
+    if enabled then
+        OriginalWalkSpeed = Humanoid.WalkSpeed
+        Humanoid.WalkSpeed = State.Speed
+    else
+        Humanoid.WalkSpeed = OriginalWalkSpeed or 16
+    end
+end
+
+createToggle(
+    MovementPage,
+    "Speed",
+    "Change character walking speed.",
+    State.SpeedEnabled,
+    setSpeedEnabled
+)
+
+createSlider(
+    MovementPage,
+    "Speed Value",
+    CONFIG.SpeedMin,
+    CONFIG.SpeedMax,
+    State.Speed,
+    function(value)
+        State.Speed = value
+
+        if State.SpeedEnabled and Humanoid then
+            Humanoid.WalkSpeed = value
+        end
+    end
+)
+
+-- JUMP
+
+local function setJumpEnabled(enabled)
+    State.JumpEnabled = enabled
+
+    if not Humanoid then
+        return
+    end
+
+    if enabled then
+        OriginalJumpPower = Humanoid.JumpPower
+        OriginalUseJumpPower = Humanoid.UseJumpPower
+
+        Humanoid.UseJumpPower = true
+        Humanoid.JumpPower = State.JumpPower
+    else
+        Humanoid.UseJumpPower =
+            OriginalUseJumpPower ~= nil
+            and OriginalUseJumpPower
+            or true
+
+        Humanoid.JumpPower =
+            OriginalJumpPower
+            or 50
+    end
+end
+
+createToggle(
+    MovementPage,
+    "High Jump",
+    "Increase character jump power.",
+    State.JumpEnabled,
+    setJumpEnabled
+)
+
+createSlider(
+    MovementPage,
+    "Jump Power",
+    CONFIG.JumpMin,
+    CONFIG.JumpMax,
+    State.JumpPower,
+    function(value)
+        State.JumpPower = value
+
+        if State.JumpEnabled and Humanoid then
+            Humanoid.UseJumpPower = true
+            Humanoid.JumpPower = value
+        end
+    end
+)
+
+--========================================================
+-- FLY
+--========================================================
+
+local function stopFly()
+    if FlyVelocity then
+        FlyVelocity:Destroy()
+        FlyVelocity = nil
+    end
+
+    if FlyGyro then
+        FlyGyro:Destroy()
+        FlyGyro = nil
+    end
+
+    if Humanoid then
+        Humanoid.AutoRotate = true
+        Humanoid.PlatformStand = false
+    end
+end
+
+local function startFly()
+    if not RootPart or not Humanoid then
+        return
+    end
+
+    stopFly()
+
+    Humanoid.AutoRotate = false
+    Humanoid.PlatformStand = true
+
+    FlyVelocity = Instance.new("BodyVelocity")
+    FlyVelocity.Name = "XiBoDzV5_FlyVelocity"
+    FlyVelocity.MaxForce = Vector3.new(
+        math.huge,
+        math.huge,
+        math.huge
+    )
+    FlyVelocity.P = 5000
+    FlyVelocity.Velocity = Vector3.zero
+    FlyVelocity.Parent = RootPart
+
+    FlyGyro = Instance.new("BodyGyro")
+    FlyGyro.Name = "XiBoDzV5_FlyGyro"
+    FlyGyro.MaxTorque = Vector3.new(
+        math.huge,
+        math.huge,
+        math.huge
+    )
+    FlyGyro.P = 5000
+    FlyGyro.CFrame = RootPart.CFrame
+    FlyGyro.Parent = RootPart
+end
+
+local function updateFly()
+    if not State.FlyEnabled then
+        return
+    end
+
+    if not RootPart
+        or not Humanoid
+        or not FlyVelocity
+        or not FlyGyro then
+
+        return
+    end
+
+    local direction = Humanoid.MoveDirection
+
+    local velocity = direction * State.FlySpeed
+
+    if State.FlyUp then
+        velocity += Vector3.new(
+            0,
+            State.FlySpeed,
+            0
+        )
+    end
+
+    if State.FlyDown then
+        velocity -= Vector3.new(
+            0,
+            State.FlySpeed,
+            0
+        )
+    end
+
+    FlyVelocity.Velocity = velocity
+
+    local lookVector = Camera.CFrame.LookVector
+
+    FlyGyro.CFrame = CFrame.lookAt(
+        RootPart.Position,
+        RootPart.Position + lookVector
+    )
+end
+
+local function setFlyEnabled(enabled)
+    State.FlyEnabled = enabled
+
+    if enabled then
+        startFly()
+    else
+        stopFly()
+    end
+end
+
+createToggle(
+    MovementPage,
+    "Fly",
+    "Free movement using the character controller.",
+    State.FlyEnabled,
+    setFlyEnabled
+)
+
+createSlider(
+    MovementPage,
+    "Fly Speed",
+    CONFIG.FlyMin,
+    CONFIG.FlyMax,
+    State.FlySpeed,
+    function(value)
+        State.FlySpeed = value
+    end
+)
+
+--========================================================
+-- MOBILE FLY CONTROLS
+--========================================================
+
+local FlyControls = create("Frame", {
+    Name = "FlyControls",
+    AnchorPoint = Vector2.new(1, 1),
+    Position = UDim2.new(1, -20, 1, -20),
+    Size = UDim2.fromOffset(115, 105),
+    BackgroundTransparency = 1,
+    Visible = false,
+    ZIndex = 100,
+}, ScreenGui)
+
+local UpButton = create("TextButton", {
+    Position = UDim2.fromOffset(39, 0),
+    Size = UDim2.fromOffset(76, 45),
+    BackgroundColor3 = COLORS.Panel,
+    Text = "▲",
+    Font = Enum.Font.GothamBold,
+    TextSize = 18,
+    TextColor3 = COLORS.Text,
+    AutoButtonColor = false,
+}, FlyControls)
+
+corner(UpButton, 10)
+stroke(UpButton, COLORS.Border, 1)
+
+local DownButton = create("TextButton", {
+    Position = UDim2.fromOffset(39, 52),
+    Size = UDim2.fromOffset(76, 45),
+    BackgroundColor3 = COLORS.Panel,
+    Text = "▼",
+    Font = Enum.Font.GothamBold,
+    TextSize = 18,
+    TextColor3 = COLORS.Text,
+    AutoButtonColor = false,
+}, FlyControls)
+
+corner(DownButton, 10)
+stroke(DownButton, COLORS.Border, 1)
+
+local function bindHold(button, property)
+    button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            State[property] = true
+        end
+    end)
+
+    button.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+
+            State[property] = false
+        end
+    end)
+end
+
+bindHold(UpButton, "FlyUp")
+bindHold(DownButton, "FlyDown")
+
+--========================================================
+-- AIM
+--========================================================
+
+createSectionTitle(
+    AimPage,
+    "Aim",
+    "Targeting and field-of-view controls"
+)
+
+local function isEnemy(player)
+    if player == LocalPlayer then
+        return false
+    end
+
+    if LocalPlayer.Team
+        and player.Team then
+
+        return LocalPlayer.Team ~= player.Team
+    end
+
+    return true
+end
+
+local function getAimPart(character)
+    return character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function hasLineOfSight(part, character)
+    if not part then
+        return false
+    end
+
+    local origin = Camera.CFrame.Position
+    local direction = part.Position - origin
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {
+        Character,
+    }
+    params.IgnoreWater = true
+
+    local result = Workspace:Raycast(
+        origin,
+        direction,
+        params
+    )
+
+    if not result then
+        return true
+    end
+
+    return result.Instance:IsDescendantOf(character)
+end
+
+local function getClosestTarget()
+    local viewport = Camera.ViewportSize
+
+    local center = Vector2.new(
+        viewport.X / 2,
+        viewport.Y / 2
+    )
+
+    local closest
+    local closestDistance = State.AimFOV
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isEnemy(player) then
+            local character = player.Character
+            local humanoid = character
+                and character:FindFirstChildOfClass("Humanoid")
+
+            local part = character
+                and getAimPart(character)
+
+            if humanoid
+                and humanoid.Health > 0
+                and part then
+
+                local screenPosition, visible =
+                    Camera:WorldToViewportPoint(part.Position)
+
+                if visible and screenPosition.Z > 0 then
+                    local screenPoint = Vector2.new(
+                        screenPosition.X,
+                        screenPosition.Y
+                    )
+
+                    local distance =
+                        (screenPoint - center).Magnitude
+
+                    if distance <= closestDistance then
+                        if hasLineOfSight(
+                            part,
+                            character
+                        ) then
+
+                            closestDistance = distance
+                            closest = part
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closest
+end
+
+createToggle(
+    AimPage,
+    "Smart Aim",
+    "Select the closest visible target inside FOV.",
+    State.AimEnabled,
+    function(enabled)
+        State.AimEnabled = enabled
+    end
+)
+
+createSlider(
+    AimPage,
+    "Aim FOV",
+    CONFIG.FOVMin,
+    CONFIG.FOVMax,
+    State.AimFOV,
+    function(value)
+        State.AimFOV = value
+    end
+)
+
+--========================================================
+-- FOV CIRCLE
+--========================================================
+
+local FOVCircle = create("Frame", {
+    Name = "FOVCircle",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(
+        State.AimFOV * 2,
+        State.AimFOV * 2
+    ),
+    BackgroundTransparency = 1,
+    Visible = false,
+    ZIndex = 20,
+}, ScreenGui)
+
+corner(FOVCircle, 999)
+
+local FOVStroke = stroke(
+    FOVCircle,
+    COLORS.Accent,
+    1,
+    0.25
+)
+
+local function updateFOVCircle()
+    FOVCircle.Size = UDim2.fromOffset(
+        State.AimFOV * 2,
+        State.AimFOV * 2
+    )
+
+    FOVCircle.Visible = State.AimEnabled
+end
+
+--========================================================
+-- ESP
+--========================================================
+
+createSectionTitle(
+    ESPPage,
+    "ESP",
+    "Choose each ESP element independently"
+)
+
+createToggle(
+    ESPPage,
+    "Tên Player",
+    "Hiển thị tên người chơi phía trên nhân vật.",
+    State.ESPNameEnabled,
+    function(enabled)
+        State.ESPNameEnabled = enabled
+    end
+)
+
+createToggle(
+    ESPPage,
+    "Khúc Xương",
+    "Hiển thị skeleton/xương của nhân vật.",
+    State.ESPBonesEnabled,
+    function(enabled)
+        State.ESPBonesEnabled = enabled
+    end
+)
+
+createToggle(
+    ESPPage,
+    "Định Vị / Chỉ Hướng",
+    "Hiển thị hướng nhìn và định vị của player.",
+    State.ESPDirectionsEnabled,
+    function(enabled)
+        State.ESPDirectionsEnabled = enabled
+    end
+)
+
+--========================================================
+-- ESP SYSTEM
+--========================================================
+
+local ESPFolder = create(
+    "Folder",
+    {
+        Name = "XiBoDzV5_ESP",
+    },
+    Workspace
+)
+
+local ESPObjects = {}
+
+local function getESPCharacter(player)
+    if not player then
+        return nil
+    end
+
+    local character = player.Character
+
+    if not character then
+        return nil
+    end
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    if not humanoid
+        or humanoid.Health <= 0 then
+
+        return nil
+    end
+
+    return character
+end
+
+local function getRoot(character)
+    return character:FindFirstChild(
+        "HumanoidRootPart"
+    )
+        or character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+end
+
+local function destroyESP(player)
+    local data = ESPObjects[player]
+
+    if not data then
+        return
+    end
+
+    if data.Billboard then
+        data.Billboard:Destroy()
+    end
+
+    if data.Direction then
+        if data.Direction.Beam then
+            data.Direction.Beam:Destroy()
+        end
+
+        if data.Direction.Start then
+            data.Direction.Start:Destroy()
+        end
+
+        if data.Direction.End then
+            data.Direction.End:Destroy()
+        end
+    end
+
+    if data.Bones then
+        for _, line in ipairs(data.Bones) do
+            if line then
+                line:Destroy()
+            end
+        end
+    end
+
+    ESPObjects[player] = nil
+end
+
+--========================================================
+-- NAME ESP
+--========================================================
+
+local function createNameESP(player, character)
+    if not State.ESPNameEnabled then
+        return nil
+    end
+
+    local head = character:FindFirstChild("Head")
+
+    if not head then
+        return nil
+    end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_Name"
+    billboard.Adornee = head
+    billboard.Size = UDim2.fromOffset(180, 35)
+    billboard.StudsOffset = Vector3.new(
+        0,
+        2.8,
+        0
+    )
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = 1000
+    billboard.ResetOnSpawn = false
+    billboard.Parent = ESPFolder
+
+    local label = Instance.new("TextLabel")
+    label.Name = "PlayerName"
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.fromScale(1, 1)
+
+    label.Text =
+        player.DisplayName
+        .. "  @"
+        .. player.Name
+
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 13
+    label.TextStrokeTransparency = 0.2
+    label.TextColor3 = Color3.fromRGB(
+        255,
+        255,
+        255
+    )
+
+    label.Parent = billboard
+
+    return billboard
+end
+
+--========================================================
+-- BONE ESP
+--========================================================
+
+local R15_CONNECTIONS = {
+    {"Head", "UpperTorso"},
+    {"UpperTorso", "LowerTorso"},
+
+    {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"},
+
+    {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"},
+    {"RightLowerArm", "RightHand"},
+
+    {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"},
+
+    {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"},
+    {"RightLowerLeg", "RightFoot"},
+}
+
+local R6_CONNECTIONS = {
+    {"Head", "Torso"},
+    {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"},
+}
+
+local function createBoneAttachment(part, name)
+    local attachment = Instance.new("Attachment")
+    attachment.Name = name
+    attachment.Parent = part
+
+    return attachment
+end
+
+local function createBoneLine(
+    attachment0,
+    attachment1
+)
+    local beam = Instance.new("Beam")
+
+    beam.Name = "ESP_Bone"
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+
+    beam.FaceCamera = true
+
+    beam.Width0 = 0.045
+    beam.Width1 = 0.045
+
+    beam.Color = ColorSequence.new(
+        Color3.fromRGB(
+            255,
+            255,
+            255
+        )
+    )
+
+    beam.Transparency = NumberSequence.new(
+        0.05
+    )
+
+    beam.LightEmission = 1
+
+    beam.Parent = ESPFolder
+
+    return beam
+end
+
+local function createBones(player, character)
+    if not State.ESPBonesEnabled then
+        return {}
+    end
+
+    local bones = {}
+
+    local connections
+
+    if character:FindFirstChild("UpperTorso") then
+        connections = R15_CONNECTIONS
+    else
+        connections = R6_CONNECTIONS
+    end
+
+    for index, pair in ipairs(connections) do
+        local partA =
+            character:FindFirstChild(pair[1])
+
+        local partB =
+            character:FindFirstChild(pair[2])
+
+        if partA
+            and partB
+            and partA:IsA("BasePart")
+            and partB:IsA("BasePart") then
+
+            local attachmentA =
+                createBoneAttachment(
+                    partA,
+                    "XiBoBoneA_" .. index
+                )
+
+            local attachmentB =
+                createBoneAttachment(
+                    partB,
+                    "XiBoBoneB_" .. index
+                )
+
+            local beam =
+                createBoneLine(
+                    attachmentA,
+                    attachmentB
+                )
+
+            table.insert(
+                bones,
+                beam
+            )
+
+            table.insert(
+                bones,
+                attachmentA
+            )
+
+            table.insert(
+                bones,
+                attachmentB
+            )
+        end
+    end
+
+    return bones
+end
+
+--========================================================
+-- DIRECTION ESP
+--========================================================
+
+local function createDirectionESP(
+    player,
+    character
+)
+    if not State.ESPDirectionsEnabled then
+        return nil
+    end
+
+    local root = getRoot(character)
+
+    if not root then
+        return nil
+    end
+
+    local startAttachment =
+        Instance.new("Attachment")
+
+    startAttachment.Name =
+        "XiBoDirectionStart"
+
+    startAttachment.Position =
+        Vector3.zero
+
+    startAttachment.Parent = root
+
+    local endAttachment =
+        Instance.new("Attachment")
+
+    endAttachment.Name =
+        "XiBoDirectionEnd"
+
+    endAttachment.Position =
+        Vector3.new(
+            0,
+            0,
+            -5
+        )
+
+    endAttachment.Parent = root
+
+    local beam = Instance.new("Beam")
+
+    beam.Name = "ESP_Direction"
+
+    beam.Attachment0 =
+        startAttachment
+
+    beam.Attachment1 =
+        endAttachment
+
+    beam.FaceCamera = true
+
+    beam.Width0 = 0.09
+    beam.Width1 = 0.025
+
+    beam.Color = ColorSequence.new(
+        Color3.fromRGB(
+            255,
+            170,
+            50
+        )
+    )
+
+    beam.Transparency =
+        NumberSequence.new(0.05)
+
+    beam.LightEmission = 1
+
+    beam.Parent = ESPFolder
+
+    return {
+        Beam = beam,
+        Start = startAttachment,
+        End = endAttachment,
+    }
+end
+
+--========================================================
+-- CREATE PLAYER ESP
+--========================================================
+
+local function createESP(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    local character =
+        getESPCharacter(player)
+
+    if not character then
+        destroyESP(player)
+        return
+    end
+
+    destroyESP(player)
+
+    local data = {
+        Billboard = nil,
+        Bones = {},
+        Direction = nil,
+    }
+
+    if State.ESPNameEnabled then
+        data.Billboard =
+            createNameESP(
+                player,
+                character
+            )
+    end
+
+    if State.ESPBonesEnabled then
+        data.Bones =
+            createBones(
+                player,
+                character
+            )
+    end
+
+    if State.ESPDirectionsEnabled then
+        data.Direction =
+            createDirectionESP(
+                player,
+                character
+            )
+    end
+
+    ESPObjects[player] = data
+end
+
+local function refreshESP()
+    local enabled =
+        State.ESPNameEnabled
+        or State.ESPBonesEnabled
+        or State.ESPDirectionsEnabled
+
+    if not enabled then
+        for player in pairs(ESPObjects) do
+            destroyESP(player)
+        end
+
+        return
+    end
+
+    for _, player in ipairs(
+        Players:GetPlayers()
+    ) do
+        if player ~= LocalPlayer then
+            createESP(player)
+        end
+    end
+end
+
+--========================================================
+-- ESP TOGGLE REFRESH HOOKS
+--========================================================
+
+for _, child in ipairs(ESPPage:GetChildren()) do
+    if child:IsA("Frame") then
+        local toggle = child:FindFirstChild("Toggle")
+
+        if toggle then
+            toggle.Activated:Connect(function()
+                task.defer(refreshESP)
+            end)
+        end
+    end
+end
+
+--========================================================
+-- PLAYER EVENTS
+--========================================================
+
+local function connectPlayer(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+
+        if not Destroyed then
+            createESP(player)
+        end
+    end)
+
+    player.CharacterRemoving:Connect(function()
+        destroyESP(player)
+    end)
+
+    if player.Character then
+        task.defer(function()
+            createESP(player)
+        end)
+    end
+end
+
+for _, player in ipairs(
+    Players:GetPlayers()
+) do
+    connectPlayer(player)
+end
+
+Players.PlayerAdded:Connect(
+    connectPlayer
+)
+
+Players.PlayerRemoving:Connect(function(player)
+    destroyESP(player)
+end)
+
+--========================================================
+-- DEBUG / NOCLIP
+--========================================================
+
+createSectionTitle(
+    DebugPage,
+    "Debug",
+    "Character debugging tools"
+)
+
+local function restoreNoClip()
+    for part, collision in pairs(
+        NoClipBackup
+    ) do
+        if part
+            and part.Parent
+            and part:IsA("BasePart") then
+
+            part.CanCollide = collision
+        end
+    end
+
+    table.clear(NoClipBackup)
+end
+
+local function setNoClip(enabled)
+    State.NoClipEnabled = enabled
+
+    if not enabled then
+        restoreNoClip()
+    end
+end
+
+createToggle(
+    DebugPage,
+    "No Clip",
+    "Disable character collision while enabled.",
+    State.NoClipEnabled,
+    setNoClip
+)
+
+local function updateNoClip()
+    if not State.NoClipEnabled
+        or not Character then
+
+        return
+    end
+
+    for _, part in ipairs(
+        Character:GetDescendants()
+    ) do
+        if part:IsA("BasePart") then
+
+            if NoClipBackup[part] == nil then
+                NoClipBackup[part] =
+                    part.CanCollide
+            end
+
+            part.CanCollide = false
+        end
+    end
+end
+
+--========================================================
+-- PERFORMANCE
+--========================================================
+
+createSectionTitle(
+    PerformancePage,
+    "Performance",
+    "Reduce visual effects for debugging/testing"
+)
+
+local function restorePerformance()
+    for object, properties in pairs(
+        PerformanceBackup
+    ) do
+        if object and object.Parent then
+
+            for property, value in pairs(
+                properties
+            ) do
+                pcall(function()
+                    object[property] = value
+                end)
+            end
+
+        end
+    end
+
+    table.clear(PerformanceBackup)
+end
+
+local function setPerformance(enabled)
+    State.PerformanceEnabled = enabled
+
+    if not enabled then
+        restorePerformance()
+        return
+    end
+
+    for _, object in ipairs(
+        game:GetDescendants()
+    ) do
+
+        if object:IsA("ParticleEmitter")
+            or object:IsA("Trail")
+            or object:IsA("Beam")
+            or object:IsA("Smoke")
+            or object:IsA("Fire")
+            or object:IsA("Sparkles") then
+
+            PerformanceBackup[object] =
+                PerformanceBackup[object]
+                or {
+                    Enabled = object.Enabled,
+                }
+
+            object.Enabled = false
+
+        elseif object:IsA("PostEffect") then
+
+            PerformanceBackup[object] =
+                PerformanceBackup[object]
+                or {
+                    Enabled = object.Enabled,
+                }
+
+            object.Enabled = false
+        end
+    end
+
+    PerformanceBackup[Lighting] =
+        PerformanceBackup[Lighting]
+        or {
+            GlobalShadows = Lighting.GlobalShadows,
+            FogEnd = Lighting.FogEnd,
+            EnvironmentDiffuseScale =
+                Lighting.EnvironmentDiffuseScale,
+            EnvironmentSpecularScale =
+                Lighting.EnvironmentSpecularScale,
+        }
+
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+end
+
+createToggle(
+    PerformancePage,
+    "Ultra Performance",
+    "Reduce particles, post effects and lighting cost.",
+    State.PerformanceEnabled,
+    setPerformance
+)
+
+--========================================================
+-- OPEN VIP BUTTON
+--========================================================
+
+local OpenButton = create("TextButton", {
+    Name = "OpenVIP",
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 18, 1, -18),
+    Size = UDim2.fromOffset(115, 42),
+    BackgroundColor3 = COLORS.Panel,
+    BorderSizePixel = 0,
+    Text = "XiBoDzV5",
+    Font = Enum.Font.GothamBold,
+    TextSize = 12,
+    TextColor3 = COLORS.Text,
+    AutoButtonColor = false,
+    Visible = false,
+}, ScreenGui)
+
+corner(OpenButton, 10)
+stroke(OpenButton, COLORS.Border, 1)
+
+OpenButton.Activated:Connect(function()
+    Main.Visible = true
+    OpenButton.Visible = false
+end)
+
+CloseButton.Activated:Connect(function()
+    Main.Visible = false
+    OpenButton.Visible = true
+end)
+
+--========================================================
+-- KEYBOARD FLY
+--========================================================
+
+UserInputService.InputBegan:Connect(function(
+    input,
+    processed
+)
+    if processed then
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.Space then
+        State.FlyUp = true
+    elseif input.KeyCode == Enum.KeyCode.LeftControl
+        or input.KeyCode == Enum.KeyCode.RightControl then
+
+        State.FlyDown = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(
+    input
+)
+    if input.KeyCode == Enum.KeyCode.Space then
+        State.FlyUp = false
+    elseif input.KeyCode == Enum.KeyCode.LeftControl
+        or input.KeyCode == Enum.KeyCode.RightControl then
+
+        State.FlyDown = false
+    end
+end)
+
+--========================================================
+-- CHARACTER RESPAWN
+--========================================================
+
+LocalPlayer.CharacterAdded:Connect(function(
+    newCharacter
+)
+    Character = newCharacter
+
+    Humanoid =
+        newCharacter:WaitForChild(
+            "Humanoid",
+            5
+        )
+
+    RootPart =
+        newCharacter:WaitForChild(
+            "HumanoidRootPart",
+            5
+        )
+
+    if Humanoid then
+        OriginalWalkSpeed =
+            Humanoid.WalkSpeed
+
+        OriginalJumpPower =
+            Humanoid.JumpPower
+
+        OriginalUseJumpPower =
+            Humanoid.UseJumpPower
+    end
+
+    stopFly()
+    restoreNoClip()
+
+    task.wait(0.25)
+
+    if State.SpeedEnabled
+        and Humanoid then
+
+        OriginalWalkSpeed =
+            Humanoid.WalkSpeed
+
+        Humanoid.WalkSpeed =
+            State.Speed
+    end
+
+    if State.JumpEnabled
+        and Humanoid then
+
+        OriginalJumpPower =
+            Humanoid.JumpPower
+
+        OriginalUseJumpPower =
+            Humanoid.UseJumpPower
+
+        Humanoid.UseJumpPower = true
+        Humanoid.JumpPower =
+            State.JumpPower
+    end
+
+    if State.FlyEnabled then
+        startFly()
+    end
+
+    refreshESP()
+end)
+
+--========================================================
+-- MAIN RUNTIME
+--========================================================
+
+local espTimer = 0
+
+table.insert(
+    Connections,
+    RunService.RenderStepped:Connect(
+        function(deltaTime)
+
+            if Destroyed then
+                return
+            end
+
+            -- SPEED
+            if State.SpeedEnabled
+                and Humanoid then
+
+                Humanoid.WalkSpeed =
+                    State.Speed
+            end
+
+            -- JUMP
+            if State.JumpEnabled
+                and Humanoid then
+
+                Humanoid.UseJumpPower = true
+                Humanoid.JumpPower =
+                    State.JumpPower
+            end
+
+            -- FLY
+            if State.FlyEnabled then
+                updateFly()
+            end
+
+            -- NOCLIP
+            if State.NoClipEnabled then
+                updateNoClip()
+            end
+
+            -- AIM
+            if State.AimEnabled then
+                local target =
+                    getClosestTarget()
+
+                if target then
+                    local targetCFrame =
+                        CFrame.lookAt(
+                            Camera.CFrame.Position,
+                            target.Position
+                        )
+
+                    Camera.CFrame =
+                        Camera.CFrame:Lerp(
+                            targetCFrame,
+                            CONFIG.AimSmoothness
+                        )
+                end
+            end
+
+            -- FOV
+            updateFOVCircle()
+
+            -- ESP
+            espTimer += deltaTime
+
+            if espTimer >= CONFIG.ESPRefresh then
+                espTimer = 0
+
+                local espEnabled =
+                    State.ESPNameEnabled
+                    or State.ESPBonesEnabled
+                    or State.ESPDirectionsEnabled
+
+                if espEnabled then
+                    refreshESP()
+                end
+            end
+        end
+    )
+)
+
+--========================================================
+-- CLEANUP
+--========================================================
+
+ScreenGui.Destroying:Connect(function()
+    Destroyed = true
+
+    stopFly()
+    restoreNoClip()
+    restorePerformance()
+
+    for player in pairs(ESPObjects) do
+        destroyESP(player)
+    end
+
+    if ESPFolder then
+        ESPFolder:Destroy()
+    end
+
+    for _, connection in ipairs(Connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+end)
+
+--========================================================
+-- FINAL
+--========================================================
+
+print(
+    "[XiBoDzV5] V6 loaded successfully."
+)
